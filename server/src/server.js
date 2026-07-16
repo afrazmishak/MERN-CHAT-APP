@@ -5,11 +5,30 @@ import { Server } from "socket.io"
 import app from "./app.js"
 import { connectDatabase } from "./config/database.js"
 import { registerSocketHandlers } from "./sockets/socketHandler.js"
-import { error } from "node:console"
 
 const PORT = process.env.PORT || 5000;
 
+function validateEnvironment() {
+    const requiredVariables = [
+        "MONGODB_URL",
+        "JWT_SECRET",
+        "CLIENT_URL"
+    ];
+
+    const missingVariables = requiredVariables.filter(
+        (variableName) => !process.env[variableName]
+    );
+
+    if (missingVariables.length > 0) {
+        throw new Error(
+            `Missing environment variables: ${missingVariables.join(", ")}`
+        );
+    }
+}
+
 async function startServer() {
+    validateEnvironment();
+    
     await connectDatabase()
 
     const httpServer = http.createServer(app);
