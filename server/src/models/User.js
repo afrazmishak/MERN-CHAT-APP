@@ -1,5 +1,5 @@
-import mongoose from "mongoose"
-import bcrypt from "bcryptjs"
+import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
 
 const userSchema = new mongoose.Schema(
     {
@@ -21,7 +21,7 @@ const userSchema = new mongoose.Schema(
             maxlength: [30, "Username cannot exceed 30 characters"],
             match: [
                 /^[a-zA-Z0-9_]+$/,
-                "USername can only contain letters, numbers and underscores",
+                "Username can only contain letters, numbers and underscores",
             ],
         },
 
@@ -60,7 +60,7 @@ userSchema.methods.comparePassword = async function comparePassword(
     candidatePassword
 ) {
     return bcrypt.compare(candidatePassword, this.password);
-}
+};
 
 const User = mongoose.model("User", userSchema);
 
