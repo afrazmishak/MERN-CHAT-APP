@@ -11,7 +11,7 @@ const conversationSchema = new mongoose.Schema(
         name: {
             type: String,
             trim: true,
-            minlength:[2, "Conversation name must contain at least 2 characters"],
+            minlength: [2, "Conversation name must contain at least 2 characters"],
             maxlength: [60, "Conversation name connot exceed 60 characters"],
             required: function requireNameForRoom() {
                 return this.type == "room";
@@ -23,7 +23,7 @@ const conversationSchema = new mongoose.Schema(
             trim: true,
             lowercase: true,
         },
-        
+
         description: {
             type: String,
             trim: true,
@@ -44,6 +44,55 @@ const conversationSchema = new mongoose.Schema(
             default: null,
         },
 
-        isPublic: 
+        isPublic: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            default: null,
+        },
+    },
+    {
+        timestamps: true,
+        versionKey: false,
     }
 )
+
+conversationSchema.index(
+    {
+        slug: 1,
+    },
+    {
+        unique: true,
+        sparse: true,
+    }
+);
+
+conversationSchema.pre("validate", function validateConversation() {
+    if (this.type == "room" && !this.slug) {
+        this.invalidate("slug", "Room slug is required");
+    }
+
+    if (this.type === "direct") {
+        this.slug = undefined;
+        this.isPublic = false;
+
+        const uniqueParticipantIds = new Set(
+            this.participants.map((participantId) =>
+                participantId.toString()
+            )
+        );
+
+        if(uniqueParticipantIds.size !== 2) {
+            this.invalidate(
+                "particiapnts",
+                "A direct conversation must contain exactly two different users"
+            );
+        }
+    }
+});
+
+const Conversation = mongoose.model(
+    "Conversation",
+    conversationSchema
+);
+
+export default Conversation;
