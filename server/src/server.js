@@ -4,6 +4,7 @@ import { Server } from "socket.io";
 
 import app from "./app.js";
 import { connectDatabase } from "./config/database.js";
+import { seedDefaultRooms } from "./config/seedDefaultRooms.js";
 import { registerSocketHandlers } from "./sockets/socketHandler.js";
 
 const PORT = process.env.PORT || 5000;
@@ -30,6 +31,7 @@ async function startServer() {
   validateEnvironment();
 
   await connectDatabase();
+  await seedDefaultRooms();
 
   const httpServer = http.createServer(app);
 

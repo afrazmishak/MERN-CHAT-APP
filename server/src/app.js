@@ -3,6 +3,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 
 import authRoutes from "./routes/authRoutes.js";
+import conversationRoutes from "./routes/conversationRoutes.js";
 import AppError from "./utils/AppError.js";
 import { errorMiddleware } from "./middleware/errorMiddleware.js";
 
@@ -35,6 +36,7 @@ app.get("/api/health", (request, response) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api/conversations", conversationRoutes);
 
 app.use((request, response, next) => {
   next(
