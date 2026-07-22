@@ -1,12 +1,21 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import apiClient from "../api/apiClient";
 import { useAuth } from "../context/AuthContext";
 import socket from "../socket/socket";
 
 function ChatPage() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+
+  const [conversations, setConversations] = useState([]);
+  const [selectedConversation, setSelectedConversation] = 
+    useState(null);
+
+  const [socketConnected, setSocketConnected] = useState(false);
+
+  const [joiningConversation, setJoiningConversation]
 
   const [socketStatus, setSocketStatus] = useState("Connecting...");
   const [socketId, setSocketId] = useState("");

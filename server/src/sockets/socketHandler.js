@@ -45,7 +45,7 @@ export function registerSocketHandlers(io) {
             });
           }
 
-          const conversation = 
+          const conversation =
             await Conversation.findById(conversationId);
 
           if (!conversation) {
@@ -89,11 +89,61 @@ export function registerSocketHandlers(io) {
             `${socket.user.username} joined ${conversation.name}`
           );
 
-          sendAcknowledgement(acknowledge, )
+          sendAcknowledgement(acknowledge, {
+            success: true,
+            conversationId,
+            message: `Joined ${conversation.name}`,
+          });
+
+          socket.emit("conversation:joined", {
+            conversationId,
+            name: conversation.name,
+          });
+        } catch (error) {
+          console.error(
+            "Conversation join failed:",
+            error.message
+          );
+
+          sendAcknowledgement(acknowledge, {
+            success: false,
+            message: "Unable to join conversation",
+          });
         }
       }
-    )
-    
+    );
+
+    socket.on(
+      "conversation:leave",
+      (payload = {}, acknowledge) => {
+        const conversationId =
+          payload.conversationId ||
+          socket.activeConversationId;
+
+        if (!conversationId) {
+          return sendAcknowledgement(acknowledge, {
+            success: false,
+            message: "No active conversation",
+          });
+        }
+
+        socket.leave(
+          getSocketRoomName(conversationId)
+        );
+
+        if (
+          socket.activeConversationId === conversationId
+        ) {
+          socket.activeConversationId = null;
+        }
+
+        sendAcknowledgement(acknowledge, {
+          success: true,
+          conversationId,
+        });
+      }
+    );
+
     socket.on("disconnect", (reason) => {
       console.log(
         `Socket disconnected: ${socket.user.username}. Reason: ${reason}`
