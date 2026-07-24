@@ -13,41 +13,70 @@ function ChatPage() {
   const [selectedConversation, setSelectedConversation] =
     useState(null);
 
-  const [socketConnected, setSocketConnected] = useState(false);
+  const [socketConnected, setSocketConnected] =
+    useState(false);
 
-  const [joiningConversation, setJoiningConversation] = useState(false);
+  const [joinedConversationId, setJoinedConversationId] =
+    useState(null);
 
-  const [loadingConversations, setLoadingConversations] = useState(true);
+  const [
+    joinFailedConversationId,
+    setJoinFailedConversationId,
+  ] = useState(null);
+
+  const [loadingConversations, setLoadingConversations] =
+    useState(true);
 
   const [error, setError] = useState("");
 
-  const [showRoomForm, setShowRoomForm] = useState(false);
+  const [showRoomForm, setShowRoomForm] =
+    useState(false);
 
   const [newRoom, setNewRoom] = useState({
     name: "",
-    description: ""
+    description: "",
   });
 
-  const [creatingRoom, setCreatingRoom] = useState(false);
+  const [creatingRoom, setCreatingRoom] =
+    useState(false);
+
+  const selectedConversationId =
+    selectedConversation?.id ?? null;
+
+  let roomConnectionState = "disconnected";
+
+  if (socketConnected && selectedConversationId) {
+    if (joinedConversationId === selectedConversationId) {
+      roomConnectionState = "joined";
+    } else if (
+      joinFailedConversationId === selectedConversationId
+    ) {
+      roomConnectionState = "failed";
+    } else {
+      roomConnectionState = "joining";
+    }
+  }
 
   useEffect(() => {
     let componentActive = true;
 
     async function loadConversations() {
       try {
-        const response = await apiClient.get("/conversations");
+        const response =
+          await apiClient.get("/conversations");
 
         if (!componentActive) {
           return;
         }
 
-        const loadedConversations = response.data.conversations;
+        const loadedConversations =
+          response.data.conversations;
 
         setConversations(loadedConversations);
 
         if (loadedConversations.length > 0) {
           setSelectedConversation(
-            loadConversations[0]
+            loadedConversations[0]
           );
         }
       } catch (requestError) {
@@ -68,14 +97,8 @@ function ChatPage() {
 
     return () => {
       componentActive = false;
-    }
+    };
   }, []);
-
-
-
-
-  const [socketStatus, setSocketStatus] = useState("Connecting...");
-  const [socketId, setSocketId] = useState("");
 
   useEffect(() => {
     function handleConnect() {
@@ -85,19 +108,25 @@ function ChatPage() {
 
     function handleDisconnect() {
       setSocketConnected(false);
+      setJoinedConversationId(null);
     }
 
     function handleConnectionError(connectionError) {
       setSocketConnected(false);
+      setJoinedConversationId(null);
 
       setError(
-        connectionError.message || "Socket connection failed"
+        connectionError.message ||
+        "Socket connection failed"
       );
     }
 
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
-    socket.on("connect_error", handleConnectionError);
+    socket.on(
+      "connect_error",
+      handleConnectionError
+    );
 
     if (socket.connected) {
       handleConnect();
@@ -108,51 +137,71 @@ function ChatPage() {
     return () => {
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
-      socket.off("connect_error", handleConnectionError);
+      socket.off(
+        "connect_error",
+        handleConnectionError
+      );
 
       socket.disconnect();
     };
   }, []);
 
   useEffect(() => {
-    IF(
-      !socketConnected ||
-      !selectedConversation?.id
-    ) {
+    if (!socketConnected || !selectedConversationId) {
       return;
     }
 
-    setJoiningConversation(true);
-    setError("")
+    let effectCancelled = false;
 
     socket.emit(
       "conversation:join",
       {
-        conversationId: selectedConversation.id,
+        conversationId: selectedConversationId,
       },
       (result) => {
-        setJoiningConversation(false);
+        if (effectCancelled) {
+          return;
+        }
 
         if (!result?.success) {
-          setError(
-            result?.message || "Unable to join conversation"
+          setJoinedConversationId(null);
+
+          setJoinFailedConversationId(
+            selectedConversationId
           );
+
+          setError(
+            result?.message ||
+            "Unable to join conversation"
+          );
+
+          return;
         }
+
+        setJoinedConversationId(
+          selectedConversationId
+        );
+
+        setJoinFailedConversationId(null);
+        setError("");
       }
     );
-  }, [
-    selectedConversation?.id,
-    socketConnected,
-  ]);
+
+    return () => {
+      effectCancelled = true;
+    };
+  }, [selectedConversationId, socketConnected]);
 
   function selectConversation(conversation) {
     if (
-      conversation.id === selectConversation?.id
+      conversation.id === selectedConversation?.id
     ) {
       return;
     }
 
-    selectConversation(conversation);
+    setError("");
+    setJoinFailedConversationId(null);
+    setSelectedConversation(conversation);
   }
 
   function handleNewRoomChange(event) {
@@ -176,11 +225,12 @@ function ChatPage() {
         newRoom
       );
 
-      const createRoom = response.data.conversation;
+      const createdRoom =
+        response.data.conversation;
 
       setConversations((currentConversations) => [
         ...currentConversations,
-        createdRoom
+        createdRoom,
       ]);
 
       setSelectedConversation(createdRoom);
@@ -235,7 +285,7 @@ function ChatPage() {
             title={
               socketConnected
                 ? "Connected"
-                : "Disconnect"
+                : "Disconnected"
             }
           />
         </header>
@@ -268,8 +318,8 @@ function ChatPage() {
                 name="name"
                 value={newRoom.name}
                 onChange={handleNewRoomChange}
-                minLength={2}
-                maxLength={60}
+                minLength="2"
+                maxLength="60"
                 placeholder="Project Alpha"
                 required
               />
@@ -281,9 +331,9 @@ function ChatPage() {
                 name="description"
                 value={newRoom.description}
                 onChange={handleNewRoomChange}
-                maxLength={250}
+                maxLength="250"
                 placeholder="What is this room about?"
-                rows={3}
+                rows="3"
               />
             </label>
 
@@ -294,8 +344,7 @@ function ChatPage() {
             >
               {creatingRoom
                 ? "Creating..."
-                : "Create"
-              }
+                : "Create"}
             </button>
           </form>
         )}
@@ -327,9 +376,9 @@ function ChatPage() {
                   type="button"
                   key={conversation.id}
                   className={
-                    selectConversation?.id ===
+                    selectedConversation?.id ===
                       conversation.id
-                      ? "conversation-item acitve"
+                      ? "conversation-item active"
                       : "conversation-item"
                   }
                   onClick={() =>
@@ -356,7 +405,8 @@ function ChatPage() {
                   </span>
                 </button>
               )
-            )}</nav>
+            )}
+          </nav>
         </div>
 
         <footer className="sidebar-footer">
@@ -378,7 +428,7 @@ function ChatPage() {
             className="logout-button"
             onClick={handleLogout}
           >
-            Logout
+            Log out
           </button>
         </footer>
       </aside>
@@ -414,25 +464,25 @@ function ChatPage() {
                 </h2>
 
                 <p>
-                  {selectConversation.description ||
+                  {selectedConversation.description ||
                     "No room description"}
                 </p>
               </div>
 
               <div
-                className={
-                  joiningConversation
-                    ? "room-status joining"
-                    : socketConnected
-                      ? "room-status joined"
-                      : "room-status disconnected"
-                }
+                className={`room-status ${roomConnectionState}`}
               >
-                {joiningConversation
-                  ? "Joining..."
-                  : socketConnected
-                    ? "Connected"
-                    : "Disconnected"}
+                {roomConnectionState === "joining" &&
+                  "Joining..."}
+
+                {roomConnectionState === "joined" &&
+                  "Connected"}
+
+                {roomConnectionState === "failed" &&
+                  "Join failed"}
+
+                {roomConnectionState === "disconnected" &&
+                  "Disconnected"}
               </div>
             </header>
 
@@ -443,70 +493,33 @@ function ChatPage() {
 
               <h2>
                 Welcome to #
-                {selectConversation.name}
+                {selectedConversation.name}
               </h2>
 
+              <p>
+                You successfully joined this
+                conversation through Socket.IO.
+              </p>
+
               <p className="phase-note">
-                Persistent real-time messages will be added in Phase 4.
+                Persistent real-time messages will
+                be added in Phase 4.
               </p>
             </div>
 
             <footer className="disabled-composer">
               <input
                 type="text"
-                placeholder={`Message #${selectConversation.name}`}
+                placeholder={`Message #${selectedConversation.name}`}
                 disabled
               />
 
-              <button type="button" disabled></button>
+              <button type="button" disabled>
+                Send
+              </button>
             </footer>
           </>
         )}
-      </section>
-
-      <section className="chat-sidebar">
-        <div className="chat-placeholder-header">
-          <div>
-            <h1>MERN Chat</h1>
-            <p>
-              Signed in as <strong>@{user.username}</strong>
-            </p>
-          </div>
-
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={handleLogout}
-          >
-            Log out
-          </button>
-        </div>
-
-        {error && <div className="error-message">{error}</div>}
-
-        <div className="connection-details">
-          <p>
-            API authentication: <strong>Authenticated</strong>
-          </p>
-
-          <p>
-            Socket status: <strong>{socketStatus}</strong>
-          </p>
-
-          {socketId && (
-            <p>
-              Socket ID: <code>{socketId}</code>
-            </p>
-          )}
-        </div>
-
-        <div className="next-feature">
-          <h2>Authentication is working</h2>
-          <p>
-            The chat dashboard and conversations will be added in
-            Phase 3.
-          </p>
-        </div>
       </section>
     </main>
   );

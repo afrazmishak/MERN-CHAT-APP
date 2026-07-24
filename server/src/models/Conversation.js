@@ -1,98 +1,107 @@
-import mongoose from "mongoose"
+import mongoose from "mongoose";
 
 const conversationSchema = new mongoose.Schema(
-    {
-        type: {
-            type: String,
-            enum: ["room", "direct"],
-            required: true,
-        },
-
-        name: {
-            type: String,
-            trim: true,
-            minlength: [2, "Conversation name must contain at least 2 characters"],
-            maxlength: [60, "Conversation name connot exceed 60 characters"],
-            required: function requireNameForRoom() {
-                return this.type == "room";
-            },
-        },
-
-        slug: {
-            type: String,
-            trim: true,
-            lowercase: true,
-        },
-
-        description: {
-            type: String,
-            trim: true,
-            maxlength: [250, "Description cannot exceed 250 characters"],
-            default: "",
-        },
-
-        participants: [
-            {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: "User",
-            },
-        ],
-
-        createdBy: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "User",
-            default: null,
-        },
-
-        isPublic: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "User",
-            default: null,
-        },
+  {
+    type: {
+      type: String,
+      enum: ["room", "direct"],
+      required: true,
     },
-    {
-        timestamps: true,
-        versionKey: false,
-    }
-)
 
-conversationSchema.index(
-    {
-        slug: 1,
+    name: {
+      type: String,
+      trim: true,
+      minlength: [
+        2,
+        "Conversation name must contain at least 2 characters",
+      ],
+      maxlength: [
+        60,
+        "Conversation name cannot exceed 60 characters",
+      ],
+      required: function requireRoomName() {
+        return this.type === "room";
+      },
     },
-    {
-        unique: true,
-        sparse: true,
-    }
+
+    slug: {
+      type: String,
+      trim: true,
+      lowercase: true,
+    },
+
+    description: {
+      type: String,
+      trim: true,
+      maxlength: [
+        250,
+        "Description cannot exceed 250 characters",
+      ],
+      default: "",
+    },
+
+    participants: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    isPublic: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  {
+    timestamps: true,
+    versionKey: false,
+  }
 );
 
-conversationSchema.pre("validate", function validateConversation() {
-    if (this.type == "room" && !this.slug) {
-        this.invalidate("slug", "Room slug is required");
+conversationSchema.index(
+  { slug: 1 },
+  {
+    unique: true,
+    sparse: true,
+  }
+);
+
+conversationSchema.pre(
+  "validate",
+  function validateConversation() {
+    if (this.type === "room" && !this.slug) {
+      this.invalidate("slug", "Room slug is required");
     }
 
     if (this.type === "direct") {
-        this.slug = undefined;
-        this.isPublic = false;
+      this.slug = undefined;
+      this.isPublic = false;
 
-        const uniqueParticipantIds = new Set(
-            this.participants.map((participantId) =>
-                participantId.toString()
-            )
+      const uniqueParticipantIds = new Set(
+        this.participants.map((participantId) =>
+          participantId.toString()
+        )
+      );
+
+      if (uniqueParticipantIds.size !== 2) {
+        this.invalidate(
+          "participants",
+          "A direct conversation must contain exactly two different users"
         );
-
-        if(uniqueParticipantIds.size !== 2) {
-            this.invalidate(
-                "particiapnts",
-                "A direct conversation must contain exactly two different users"
-            );
-        }
+      }
     }
-});
+  }
+);
 
 const Conversation = mongoose.model(
-    "Conversation",
-    conversationSchema
+  "Conversation",
+  conversationSchema
 );
 
 export default Conversation;
