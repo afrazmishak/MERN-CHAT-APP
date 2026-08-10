@@ -51,16 +51,19 @@ export const getConversations = asyncHandler(
                 },
             ],
         })
-            .populate("participants", "_id name username")
+            .populate(
+                "participants",
+                "_id name username"
+            )
             .sort({
                 type: -1,
                 name: 1,
-                updatedAt: 1,
+                updatedAt: -1,
             });
 
         response.status(200).json({
             success: true,
-            conversation: conversation.map(
+            conversations: conversations.map(
                 serializeConversation
             ),
         });
@@ -75,7 +78,7 @@ export const getConversation = asyncHandler(
             throw new AppError("Invalid conversation ID", 400);
         }
 
-        const conversation = 
+        const conversation =
             await Conversation.findById(conversationId);
 
         if (!conversation) {
@@ -89,7 +92,7 @@ export const getConversation = asyncHandler(
             )
         ) {
             throw new AppError(
-                "You do not have access to this conversation", 
+                "You do not have access to this conversation",
                 403
             );
         }
