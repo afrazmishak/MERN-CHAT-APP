@@ -1,105 +1,272 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import {
+  useEffect,
+  useState,
+} from "react";
+
+import {
+  useNavigate,
+} from "react-router-dom";
 
 import apiClient from "../api/apiClient";
-import { useAuth } from "../context/AuthContext";
+import {
+  useAuth,
+} from "../context/AuthContext";
+
 import socket from "../socket/socket";
+
+function createClientMessageId() {
+  if (
+    typeof crypto.randomUUID ===
+    "function"
+  ) {
+    return crypto.randomUUID();
+  }
+
+  const randomValues =
+    crypto.getRandomValues(
+      new Uint32Array(4)
+    );
+
+  return `${Date.now()}-${Array.from(
+    randomValues
+  ).join("-")}`;
+}
+
+function mergeMessages(
+  currentMessages,
+  incomingMessages
+) {
+  const messageMap = new Map();
+
+  for (
+    const message of currentMessages
+  ) {
+    messageMap.set(
+      message.id,
+      message
+    );
+  }
+
+  for (
+    const message of incomingMessages
+  ) {
+    messageMap.set(
+      message.id,
+      message
+    );
+  }
+
+  return Array.from(
+    messageMap.values()
+  ).sort(
+    (firstMessage, secondMessage) =>
+      new Date(
+        firstMessage.createdAt
+      ).getTime() -
+      new Date(
+        secondMessage.createdAt
+      ).getTime()
+  );
+}
+
+function formatMessageTime(value) {
+  return new Date(
+    value
+  ).toLocaleTimeString(
+    [],
+    {
+      hour: "2-digit",
+      minute: "2-digit",
+    }
+  );
+}
 
 function ChatPage() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
 
-  const [conversations, setConversations] = useState([]);
-  const [selectedConversation, setSelectedConversation] =
-    useState(null);
+  const {
+    user,
+    logout,
+  } = useAuth();
 
-  const [socketConnected, setSocketConnected] =
-    useState(false);
+  const [
+    conversations,
+    setConversations,
+  ] = useState([]);
 
-  const [joinedConversationId, setJoinedConversationId] =
-    useState(null);
+  const [
+    selectedConversation,
+    setSelectedConversation,
+  ] = useState(null);
+
+  const [
+    socketConnected,
+    setSocketConnected,
+  ] = useState(
+    socket.connected
+  );
+
+  const [
+    joinedConversationId,
+    setJoinedConversationId,
+  ] = useState(null);
 
   const [
     joinFailedConversationId,
     setJoinFailedConversationId,
   ] = useState(null);
 
-  const [loadingConversations, setLoadingConversations] =
-    useState(true);
+  const [
+    loadingConversations,
+    setLoadingConversations,
+  ] = useState(true);
 
-  const [error, setError] = useState("");
+  const [
+    messagesByConversation,
+    setMessagesByConversation,
+  ] = useState({});
 
-  const [showRoomForm, setShowRoomForm] =
-    useState(false);
+  const [
+    loadedMessageHistory,
+    setLoadedMessageHistory,
+  ] = useState({});
 
-  const [newRoom, setNewRoom] = useState({
+  const [
+    messageDraft,
+    setMessageDraft,
+  ] = useState("");
+
+  const [
+    sendingMessage,
+    setSendingMessage,
+  ] = useState(false);
+
+  const [
+    error,
+    setError,
+  ] = useState("");
+
+  const [
+    showRoomForm,
+    setShowRoomForm,
+  ] = useState(false);
+
+  const [
+    newRoom,
+    setNewRoom,
+  ] = useState({
     name: "",
     description: "",
   });
 
-  const [creatingRoom, setCreatingRoom] =
-    useState(false);
+  const [
+    creatingRoom,
+    setCreatingRoom,
+  ] = useState(false);
 
   const selectedConversationId =
-    selectedConversation?.id ?? null;
+    selectedConversation?.id ??
+    null;
 
-  let roomConnectionState = "disconnected";
+  const messages =
+    selectedConversationId
+      ? messagesByConversation[
+          selectedConversationId
+        ] ?? []
+      : [];
 
-  if (socketConnected && selectedConversationId) {
-    if (joinedConversationId === selectedConversationId) {
-      roomConnectionState = "joined";
-    } else if (
-      joinFailedConversationId === selectedConversationId
+  const loadingMessages =
+    Boolean(
+      selectedConversationId &&
+        !loadedMessageHistory[
+          selectedConversationId
+        ]
+    );
+
+  let roomConnectionState =
+    "disconnected";
+
+  if (
+    socketConnected &&
+    selectedConversationId
+  ) {
+    if (
+      joinedConversationId ===
+      selectedConversationId
     ) {
-      roomConnectionState = "failed";
+      roomConnectionState =
+        "joined";
+    } else if (
+      joinFailedConversationId ===
+      selectedConversationId
+    ) {
+      roomConnectionState =
+        "failed";
     } else {
-      roomConnectionState = "joining";
+      roomConnectionState =
+        "joining";
     }
   }
 
+  /*
+   * Load available conversations.
+   */
   useEffect(() => {
     let componentActive = true;
 
-    async function loadConversations() {
-      try {
-        const response =
-          await apiClient.get("/conversations");
-
+    apiClient
+      .get("/conversations")
+      .then((response) => {
         if (!componentActive) {
           return;
         }
 
         const loadedConversations =
-          response.data.conversations;
+          response.data
+            .conversations;
 
-        setConversations(loadedConversations);
+        setConversations(
+          loadedConversations
+        );
 
-        if (loadedConversations.length > 0) {
+        if (
+          loadedConversations.length >
+          0
+        ) {
           setSelectedConversation(
             loadedConversations[0]
           );
         }
-      } catch (requestError) {
-        if (componentActive) {
+      })
+      .catch(
+        (requestError) => {
+          if (!componentActive) {
+            return;
+          }
+
           setError(
-            requestError.response?.data?.message ||
-            "Unable to load conversations"
+            requestError.response
+              ?.data?.message ||
+              "Unable to load conversations"
           );
         }
-      } finally {
+      )
+      .finally(() => {
         if (componentActive) {
-          setLoadingConversations(false);
+          setLoadingConversations(
+            false
+          );
         }
-      }
-    }
-
-    loadConversations();
+      });
 
     return () => {
       componentActive = false;
     };
   }, []);
 
+  /*
+   * Connect Socket.IO.
+   */
   useEffect(() => {
     function handleConnect() {
       setSocketConnected(true);
@@ -108,35 +275,57 @@ function ChatPage() {
 
     function handleDisconnect() {
       setSocketConnected(false);
-      setJoinedConversationId(null);
-    }
 
-    function handleConnectionError(connectionError) {
-      setSocketConnected(false);
-      setJoinedConversationId(null);
-
-      setError(
-        connectionError.message ||
-        "Socket connection failed"
+      setJoinedConversationId(
+        null
       );
     }
 
-    socket.on("connect", handleConnect);
-    socket.on("disconnect", handleDisconnect);
+    function handleConnectionError(
+      connectionError
+    ) {
+      setSocketConnected(false);
+
+      setJoinedConversationId(
+        null
+      );
+
+      setError(
+        connectionError.message ||
+          "Socket connection failed"
+      );
+    }
+
+    socket.on(
+      "connect",
+      handleConnect
+    );
+
+    socket.on(
+      "disconnect",
+      handleDisconnect
+    );
+
     socket.on(
       "connect_error",
       handleConnectionError
     );
 
-    if (socket.connected) {
-      handleConnect();
-    } else {
+    if (!socket.connected) {
       socket.connect();
     }
 
     return () => {
-      socket.off("connect", handleConnect);
-      socket.off("disconnect", handleDisconnect);
+      socket.off(
+        "connect",
+        handleConnect
+      );
+
+      socket.off(
+        "disconnect",
+        handleDisconnect
+      );
+
       socket.off(
         "connect_error",
         handleConnectionError
@@ -146,8 +335,63 @@ function ChatPage() {
     };
   }, []);
 
+  /*
+   * Listen for new real-time
+   * messages.
+   */
   useEffect(() => {
-    if (!socketConnected || !selectedConversationId) {
+    function handleNewMessage(
+      message
+    ) {
+      if (
+        !message?.conversationId
+      ) {
+        return;
+      }
+
+      setMessagesByConversation(
+        (currentMessages) => {
+          const conversationMessages =
+            currentMessages[
+              message
+                .conversationId
+            ] ?? [];
+
+          return {
+            ...currentMessages,
+
+            [message
+              .conversationId]:
+              mergeMessages(
+                conversationMessages,
+                [message]
+              ),
+          };
+        }
+      );
+    }
+
+    socket.on(
+      "message:new",
+      handleNewMessage
+    );
+
+    return () => {
+      socket.off(
+        "message:new",
+        handleNewMessage
+      );
+    };
+  }, []);
+
+  /*
+   * Join selected conversation.
+   */
+  useEffect(() => {
+    if (
+      !socketConnected ||
+      !selectedConversationId
+    ) {
       return;
     }
 
@@ -156,7 +400,8 @@ function ChatPage() {
     socket.emit(
       "conversation:join",
       {
-        conversationId: selectedConversationId,
+        conversationId:
+          selectedConversationId,
       },
       (result) => {
         if (effectCancelled) {
@@ -164,7 +409,9 @@ function ChatPage() {
         }
 
         if (!result?.success) {
-          setJoinedConversationId(null);
+          setJoinedConversationId(
+            null
+          );
 
           setJoinFailedConversationId(
             selectedConversationId
@@ -172,7 +419,7 @@ function ChatPage() {
 
           setError(
             result?.message ||
-            "Unable to join conversation"
+              "Unable to join conversation"
           );
 
           return;
@@ -182,7 +429,10 @@ function ChatPage() {
           selectedConversationId
         );
 
-        setJoinFailedConversationId(null);
+        setJoinFailedConversationId(
+          null
+        );
+
         setError("");
       }
     );
@@ -190,50 +440,172 @@ function ChatPage() {
     return () => {
       effectCancelled = true;
     };
-  }, [selectedConversationId, socketConnected]);
+  }, [
+    selectedConversationId,
+    socketConnected,
+  ]);
 
-  function selectConversation(conversation) {
+  /*
+   * Load persistent history.
+   */
+  useEffect(() => {
     if (
-      conversation.id === selectedConversation?.id
+      !selectedConversationId ||
+      loadedMessageHistory[
+        selectedConversationId
+      ]
+    ) {
+      return;
+    }
+
+    let componentActive = true;
+
+    apiClient
+      .get(
+        `/conversations/${selectedConversationId}/messages?limit=50`
+      )
+      .then((response) => {
+        if (!componentActive) {
+          return;
+        }
+
+        const loadedMessages =
+          response.data.messages;
+
+        setMessagesByConversation(
+          (currentMessages) => ({
+            ...currentMessages,
+
+            [selectedConversationId]:
+              mergeMessages(
+                loadedMessages,
+                currentMessages[
+                  selectedConversationId
+                ] ?? []
+              ),
+          })
+        );
+      })
+      .catch(
+        (requestError) => {
+          if (!componentActive) {
+            return;
+          }
+
+          setError(
+            requestError.response
+              ?.data?.message ||
+              "Unable to load message history"
+          );
+        }
+      )
+      .finally(() => {
+        if (!componentActive) {
+          return;
+        }
+
+        setLoadedMessageHistory(
+          (currentState) => ({
+            ...currentState,
+
+            [selectedConversationId]:
+              true,
+          })
+        );
+      });
+
+    return () => {
+      componentActive = false;
+    };
+  }, [
+    selectedConversationId,
+    loadedMessageHistory,
+  ]);
+
+  function selectConversation(
+    conversation
+  ) {
+    if (
+      conversation.id ===
+      selectedConversationId
     ) {
       return;
     }
 
     setError("");
-    setJoinFailedConversationId(null);
-    setSelectedConversation(conversation);
+
+    setJoinFailedConversationId(
+      null
+    );
+
+    setMessageDraft("");
+
+    setSelectedConversation(
+      conversation
+    );
   }
 
-  function handleNewRoomChange(event) {
-    const { name, value } = event.target;
+  function handleNewRoomChange(
+    event
+  ) {
+    const {
+      name,
+      value,
+    } = event.target;
 
-    setNewRoom((currentRoom) => ({
-      ...currentRoom,
-      [name]: value,
-    }));
+    setNewRoom(
+      (currentRoom) => ({
+        ...currentRoom,
+        [name]: value,
+      })
+    );
   }
 
-  async function handleCreateRoom(event) {
+  async function handleCreateRoom(
+    event
+  ) {
     event.preventDefault();
 
     setCreatingRoom(true);
     setError("");
 
     try {
-      const response = await apiClient.post(
-        "/conversations/rooms",
-        newRoom
-      );
+      const response =
+        await apiClient.post(
+          "/conversations/rooms",
+          newRoom
+        );
 
       const createdRoom =
-        response.data.conversation;
+        response.data
+          .conversation;
 
-      setConversations((currentConversations) => [
-        ...currentConversations,
-        createdRoom,
-      ]);
+      setConversations(
+        (
+          currentConversations
+        ) => [
+          ...currentConversations,
+          createdRoom,
+        ]
+      );
 
-      setSelectedConversation(createdRoom);
+      setMessagesByConversation(
+        (currentMessages) => ({
+          ...currentMessages,
+          [createdRoom.id]: [],
+        })
+      );
+
+      setLoadedMessageHistory(
+        (currentState) => ({
+          ...currentState,
+          [createdRoom.id]: true,
+        })
+      );
+
+      setSelectedConversation(
+        createdRoom
+      );
 
       setNewRoom({
         name: "",
@@ -243,12 +615,114 @@ function ChatPage() {
       setShowRoomForm(false);
     } catch (requestError) {
       setError(
-        requestError.response?.data?.message ||
-        "Unable to create room"
+        requestError.response
+          ?.data?.message ||
+          "Unable to create room"
       );
     } finally {
       setCreatingRoom(false);
     }
+  }
+
+  function handleSendMessage(
+    event
+  ) {
+    event.preventDefault();
+
+    const content =
+      messageDraft.trim();
+
+    if (
+      !content ||
+      !selectedConversationId ||
+      sendingMessage
+    ) {
+      return;
+    }
+
+    if (
+      roomConnectionState !==
+      "joined"
+    ) {
+      setError(
+        "Wait until the conversation is connected before sending"
+      );
+
+      return;
+    }
+
+    const clientMessageId =
+      createClientMessageId();
+
+    setSendingMessage(true);
+    setError("");
+
+    socket
+      .timeout(5000)
+      .emit(
+        "message:send",
+        {
+          conversationId:
+            selectedConversationId,
+
+          clientMessageId,
+
+          content,
+        },
+        (
+          timeoutError,
+          result
+        ) => {
+          setSendingMessage(false);
+
+          if (timeoutError) {
+            setError(
+              "The server did not confirm the message. Please try again."
+            );
+
+            return;
+          }
+
+          if (!result?.success) {
+            setError(
+              result?.message ||
+                "Unable to send message"
+            );
+
+            return;
+          }
+
+          /*
+           * Normally message:new has
+           * already added this.
+           *
+           * This merge also makes the
+           * acknowledgement safe if
+           * event ordering differs.
+           */
+          if (result.message) {
+            setMessagesByConversation(
+              (
+                currentMessages
+              ) => ({
+                ...currentMessages,
+
+                [selectedConversationId]:
+                  mergeMessages(
+                    currentMessages[
+                      selectedConversationId
+                    ] ?? [],
+                    [
+                      result.message,
+                    ]
+                  ),
+              })
+            );
+          }
+
+          setMessageDraft("");
+        }
+      );
   }
 
   async function handleLogout() {
@@ -256,12 +730,15 @@ function ChatPage() {
 
     try {
       socket.disconnect();
+
       await logout();
+
       navigate("/login");
     } catch (requestError) {
       setError(
-        requestError.response?.data?.message ||
-        "Unable to log out"
+        requestError.response
+          ?.data?.message ||
+          "Unable to log out"
       );
     }
   }
@@ -272,7 +749,6 @@ function ChatPage() {
         <header className="sidebar-header">
           <div>
             <h1>MERN Chat</h1>
-
             <p>@{user.username}</p>
           </div>
 
@@ -281,11 +757,6 @@ function ChatPage() {
               socketConnected
                 ? "connection-dot online"
                 : "connection-dot offline"
-            }
-            title={
-              socketConnected
-                ? "Connected"
-                : "Disconnected"
             }
           />
         </header>
@@ -296,7 +767,8 @@ function ChatPage() {
             className="primary-button"
             onClick={() =>
               setShowRoomForm(
-                (currentValue) => !currentValue
+                (currentValue) =>
+                  !currentValue
               )
             }
           >
@@ -309,30 +781,38 @@ function ChatPage() {
         {showRoomForm && (
           <form
             className="room-form"
-            onSubmit={handleCreateRoom}
+            onSubmit={
+              handleCreateRoom
+            }
           >
             <label>
               Room name
+
               <input
                 type="text"
                 name="name"
                 value={newRoom.name}
-                onChange={handleNewRoomChange}
+                onChange={
+                  handleNewRoomChange
+                }
                 minLength="2"
                 maxLength="60"
-                placeholder="Project Alpha"
                 required
               />
             </label>
 
             <label>
               Description
+
               <textarea
                 name="description"
-                value={newRoom.description}
-                onChange={handleNewRoomChange}
+                value={
+                  newRoom.description
+                }
+                onChange={
+                  handleNewRoomChange
+                }
                 maxLength="250"
-                placeholder="What is this room about?"
                 rows="3"
               />
             </label>
@@ -340,7 +820,9 @@ function ChatPage() {
             <button
               type="submit"
               className="primary-button"
-              disabled={creatingRoom}
+              disabled={
+                creatingRoom
+              }
             >
               {creatingRoom
                 ? "Creating..."
@@ -353,7 +835,11 @@ function ChatPage() {
           <div className="conversation-heading">
             <h2>Rooms</h2>
 
-            <span>{conversations.length}</span>
+            <span>
+              {
+                conversations.length
+              }
+            </span>
           </div>
 
           <nav className="conversation-list">
@@ -363,21 +849,16 @@ function ChatPage() {
               </p>
             )}
 
-            {!loadingConversations &&
-              conversations.length === 0 && (
-                <p className="sidebar-message">
-                  No conversations available.
-                </p>
-              )}
-
             {conversations.map(
               (conversation) => (
                 <button
                   type="button"
-                  key={conversation.id}
+                  key={
+                    conversation.id
+                  }
                   className={
-                    selectedConversation?.id ===
-                      conversation.id
+                    selectedConversationId ===
+                    conversation.id
                       ? "conversation-item active"
                       : "conversation-item"
                   }
@@ -388,14 +869,17 @@ function ChatPage() {
                   }
                 >
                   <span className="conversation-icon">
-                    {conversation.type === "room"
+                    {conversation.type ===
+                    "room"
                       ? "#"
                       : "@"}
                   </span>
 
                   <span className="conversation-details">
                     <strong>
-                      {conversation.name}
+                      {
+                        conversation.name
+                      }
                     </strong>
 
                     <small>
@@ -418,15 +902,22 @@ function ChatPage() {
             </div>
 
             <div>
-              <strong>{user.name}</strong>
-              <small>@{user.username}</small>
+              <strong>
+                {user.name}
+              </strong>
+
+              <small>
+                @{user.username}
+              </small>
             </div>
           </div>
 
           <button
             type="button"
             className="logout-button"
-            onClick={handleLogout}
+            onClick={
+              handleLogout
+            }
           >
             Log out
           </button>
@@ -440,7 +931,9 @@ function ChatPage() {
 
             <button
               type="button"
-              onClick={() => setError("")}
+              onClick={() =>
+                setError("")
+              }
             >
               ×
             </button>
@@ -449,9 +942,13 @@ function ChatPage() {
 
         {!selectedConversation ? (
           <div className="empty-conversation">
-            <h2>Select a conversation</h2>
+            <h2>
+              Select a conversation
+            </h2>
+
             <p>
-              Choose a room from the sidebar.
+              Choose a room from the
+              sidebar.
             </p>
           </div>
         ) : (
@@ -460,7 +957,9 @@ function ChatPage() {
               <div>
                 <h2>
                   <span>#</span>
-                  {selectedConversation.name}
+                  {
+                    selectedConversation.name
+                  }
                 </h2>
 
                 <p>
@@ -472,52 +971,158 @@ function ChatPage() {
               <div
                 className={`room-status ${roomConnectionState}`}
               >
-                {roomConnectionState === "joining" &&
+                {roomConnectionState ===
+                  "joining" &&
                   "Joining..."}
 
-                {roomConnectionState === "joined" &&
+                {roomConnectionState ===
+                  "joined" &&
                   "Connected"}
 
-                {roomConnectionState === "failed" &&
+                {roomConnectionState ===
+                  "failed" &&
                   "Join failed"}
 
-                {roomConnectionState === "disconnected" &&
+                {roomConnectionState ===
+                  "disconnected" &&
                   "Disconnected"}
               </div>
             </header>
 
-            <div className="message-placeholder">
-              <div className="placeholder-icon">
-                #
-              </div>
+            <div className="message-list">
+              {loadingMessages ? (
+                <div className="messages-state">
+                  Loading messages...
+                </div>
+              ) : messages.length ===
+                0 ? (
+                <div className="messages-state">
+                  <div className="placeholder-icon">
+                    #
+                  </div>
 
-              <h2>
-                Welcome to #
-                {selectedConversation.name}
-              </h2>
+                  <h2>
+                    Welcome to #
+                    {
+                      selectedConversation.name
+                    }
+                  </h2>
 
-              <p>
-                You successfully joined this
-                conversation through Socket.IO.
-              </p>
+                  <p>
+                    There are no
+                    messages yet.
+                  </p>
 
-              <p className="phase-note">
-                Persistent real-time messages will
-                be added in Phase 4.
-              </p>
+                  <p>
+                    Start the
+                    conversation.
+                  </p>
+                </div>
+              ) : (
+                messages.map(
+                  (message) => {
+                    const ownMessage =
+                      message.sender
+                        .id ===
+                      user.id;
+
+                    return (
+                      <article
+                        key={
+                          message.id
+                        }
+                        className={
+                          ownMessage
+                            ? "message-row own-message"
+                            : "message-row"
+                        }
+                      >
+                        <div className="message-avatar">
+                          {message.sender.name
+                            .charAt(
+                              0
+                            )
+                            .toUpperCase()}
+                        </div>
+
+                        <div className="message-body">
+                          <div className="message-meta">
+                            <strong>
+                              {
+                                message
+                                  .sender
+                                  .name
+                              }
+                            </strong>
+
+                            <span>
+                              @
+                              {
+                                message
+                                  .sender
+                                  .username
+                              }
+                            </span>
+
+                            <time>
+                              {formatMessageTime(
+                                message.createdAt
+                              )}
+                            </time>
+                          </div>
+
+                          <p>
+                            {
+                              message.content
+                            }
+                          </p>
+                        </div>
+                      </article>
+                    );
+                  }
+                )
+              )}
             </div>
 
-            <footer className="disabled-composer">
-              <input
-                type="text"
+            <form
+              className="message-composer"
+              onSubmit={
+                handleSendMessage
+              }
+            >
+              <textarea
+                value={
+                  messageDraft
+                }
+                onChange={(event) =>
+                  setMessageDraft(
+                    event.target.value
+                  )
+                }
                 placeholder={`Message #${selectedConversation.name}`}
-                disabled
+                maxLength="4000"
+                rows="1"
+                disabled={
+                  roomConnectionState !==
+                    "joined" ||
+                  sendingMessage
+                }
               />
 
-              <button type="button" disabled>
-                Send
+              <button
+                type="submit"
+                disabled={
+                  roomConnectionState !==
+                    "joined" ||
+                  sendingMessage ||
+                  !messageDraft.trim()
+                }
+              >
+                {sendingMessage
+                  ? "Sending..."
+                  : "Send"}
               </button>
-            </footer>
+            </form>
           </>
         )}
       </section>

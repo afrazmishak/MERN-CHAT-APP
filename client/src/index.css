@@ -560,3 +560,130 @@ a {
     padding: 12px;
   }
 }
+
+.message-list {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+  background: #ffffff;
+}
+
+.messages-state {
+  min-height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  text-align: center;
+  color: #697386;
+}
+
+.messages-state h2 {
+  margin: 8px 0;
+  color: #172033;
+}
+
+.messages-state p {
+  margin: 3px 0;
+}
+
+.message-row {
+  display: flex;
+  gap: 12px;
+  padding: 10px 8px;
+  border-radius: 10px;
+}
+
+.message-row:hover {
+  background: #f7f8fa;
+}
+
+.message-avatar {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #edf0ff;
+  color: #3659d9;
+  font-weight: 800;
+}
+
+.own-message .message-avatar {
+  background: #3659d9;
+  color: #ffffff;
+}
+
+.message-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.message-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.message-meta strong {
+  font-size: 14px;
+}
+
+.message-meta span,
+.message-meta time {
+  color: #8a93a3;
+  font-size: 12px;
+}
+
+.message-body p {
+  margin: 4px 0 0;
+  color: #303847;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message-composer {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid #e2e6ed;
+  background: #ffffff;
+}
+
+.message-composer textarea {
+  width: 100%;
+  min-height: 44px;
+  max-height: 140px;
+  padding: 11px 14px;
+  border: 1px solid #d8dde6;
+  border-radius: 10px;
+  resize: vertical;
+  outline: none;
+  line-height: 1.4;
+}
+
+.message-composer textarea:focus {
+  border-color: #3659d9;
+  box-shadow:
+    0 0 0 3px
+    rgba(54, 89, 217, 0.1);
+}
+
+.message-composer button {
+  min-width: 85px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 10px;
+  background: #3659d9;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.room-status.failed {
+  background: #fff0f0;
+  color: #a02020;
+}

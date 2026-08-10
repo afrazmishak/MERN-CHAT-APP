@@ -1,153 +1,571 @@
 import mongoose from "mongoose";
-import Conversation from "../models/Conversation.js";
-import { authenticateSocket } from "../middleware/socketAuthMiddleware.js";
-import { canAccessConversation } from "../utils/conversationAccess.js";
 
-function getSocketRoomName(conversationId) {
+import Conversation from "../models/Conversation.js";
+import Message from "../models/Message.js";
+
+import {
+  authenticateSocket,
+} from "../middleware/socketAuthMiddleware.js";
+
+import {
+  canAccessConversation,
+} from "../utils/conversationAccess.js";
+
+import {
+  serializeMessage,
+} from "../utils/serializeMessage.js";
+
+function getSocketRoomName(
+  conversationId
+) {
   return `conversation:${conversationId}`;
 }
 
-function sendAcknowledgement(acknowledge, data) {
-  if (typeof acknowledge === "function") {
+function sendAcknowledgement(
+  acknowledge,
+  data
+) {
+  if (
+    typeof acknowledge === "function"
+  ) {
     acknowledge(data);
   }
 }
 
-export function registerSocketHandlers(io) {
-  io.use(authenticateSocket);
+function validateMessagePayload(
+  payload
+) {
+  const conversationId =
+    typeof payload.conversationId ===
+    "string"
+      ? payload.conversationId.trim()
+      : "";
 
-  io.on("connection", (socket) => {
-    console.log(
-      `Authenticated socket connected: ${socket.user.username} (${socket.id})`
+  const clientMessageId =
+    typeof payload.clientMessageId ===
+    "string"
+      ? payload.clientMessageId.trim()
+      : "";
+
+  const content =
+    typeof payload.content === "string"
+      ? payload.content.trim()
+      : "";
+
+  if (
+    !conversationId ||
+    !mongoose.isValidObjectId(
+      conversationId
+    )
+  ) {
+    return {
+      success: false,
+      message:
+        "Invalid conversation ID",
+    };
+  }
+
+  if (!clientMessageId) {
+    return {
+      success: false,
+      message:
+        "Client message ID is required",
+    };
+  }
+
+  if (
+    clientMessageId.length < 10 ||
+    clientMessageId.length > 100
+  ) {
+    return {
+      success: false,
+      message:
+        "Invalid client message ID",
+    };
+  }
+
+  if (!content) {
+    return {
+      success: false,
+      message:
+        "Message cannot be empty",
+    };
+  }
+
+  if (content.length > 4000) {
+    return {
+      success: false,
+      message:
+        "Message cannot exceed 4000 characters",
+    };
+  }
+
+  return {
+    success: true,
+    conversationId,
+    clientMessageId,
+    content,
+  };
+}
+
+async function getExistingMessage({
+  senderId,
+  clientMessageId,
+}) {
+  return Message.findOne({
+    sender: senderId,
+    clientMessageId,
+  }).populate(
+    "sender",
+    "_id name username"
+  );
+}
+
+function handleExistingMessage({
+  existingMessage,
+  conversationId,
+  content,
+  acknowledge,
+}) {
+  const existingConversationId =
+    existingMessage.conversation.toString();
+
+  if (
+    existingConversationId !==
+      conversationId ||
+    existingMessage.content !== content
+  ) {
+    sendAcknowledgement(
+      acknowledge,
+      {
+        success: false,
+        code:
+          "CLIENT_MESSAGE_ID_REUSE",
+
+        message:
+          "This client message ID has already been used for another message",
+      }
     );
 
-    socket.join(`user:${socket.user.id}`);
+    return;
+  }
 
-    socket.emit("connection:ready", {
-      socketId: socket.id,
-      user: socket.user,
-      message: "Authenticated socket connection established",
-    });
+  console.log(
+    `Duplicate message safely ignored: ${existingMessage.clientMessageId}`
+  );
 
-    socket.on(
-      "conversation:join",
-      async (payload = {}, acknowledge) => {
-        try {
-          const { conversationId } = payload;
+  sendAcknowledgement(
+    acknowledge,
+    {
+      success: true,
+      duplicate: true,
+      message:
+        serializeMessage(
+          existingMessage
+        ),
+    }
+  );
+}
 
-          if (
-            !conversationId ||
-            !mongoose.isValidObjectId(conversationId)
-          ) {
-            return sendAcknowledgement(acknowledge, {
-              success: false,
-              message: "Invalid conversation ID",
-            });
-          }
+export function registerSocketHandlers(
+  io
+) {
+  io.use(authenticateSocket);
 
-          const conversation =
-            await Conversation.findById(conversationId);
+  io.on(
+    "connection",
+    (socket) => {
+      console.log(
+        `Authenticated socket connected: ${socket.user.username} (${socket.id})`
+      );
 
-          if (!conversation) {
-            return sendAcknowledgement(acknowledge, {
-              success: false,
-              message: "Conversation not found",
-            });
-          }
+      socket.join(
+        `user:${socket.user.id}`
+      );
 
-          if (
-            !canAccessConversation(
-              conversation,
-              socket.user.id
-            )
-          ) {
-            return sendAcknowledgement(acknowledge, {
-              success: false,
-              message:
-                "You do not have access to this conversation",
-            });
-          }
+      socket.emit(
+        "connection:ready",
+        {
+          socketId: socket.id,
+          user: socket.user,
+          message:
+            "Authenticated socket connection established",
+        }
+      );
 
-          if (
-            socket.activeConversationId &&
-            socket.activeConversationId !== conversationId
-          ) {
-            socket.leave(
-              getSocketRoomName(
-                socket.activeConversationId
+      socket.on(
+        "conversation:join",
+        async (
+          payload = {},
+          acknowledge
+        ) => {
+          try {
+            const {
+              conversationId,
+            } = payload;
+
+            if (
+              !conversationId ||
+              !mongoose.isValidObjectId(
+                conversationId
               )
+            ) {
+              return sendAcknowledgement(
+                acknowledge,
+                {
+                  success: false,
+                  message:
+                    "Invalid conversation ID",
+                }
+              );
+            }
+
+            const conversation =
+              await Conversation.findById(
+                conversationId
+              );
+
+            if (!conversation) {
+              return sendAcknowledgement(
+                acknowledge,
+                {
+                  success: false,
+                  message:
+                    "Conversation not found",
+                }
+              );
+            }
+
+            if (
+              !canAccessConversation(
+                conversation,
+                socket.user.id
+              )
+            ) {
+              return sendAcknowledgement(
+                acknowledge,
+                {
+                  success: false,
+                  message:
+                    "You do not have access to this conversation",
+                }
+              );
+            }
+
+            if (
+              socket.activeConversationId &&
+              socket.activeConversationId !==
+                conversationId
+            ) {
+              socket.leave(
+                getSocketRoomName(
+                  socket.activeConversationId
+                )
+              );
+            }
+
+            socket.join(
+              getSocketRoomName(
+                conversationId
+              )
+            );
+
+            socket.activeConversationId =
+              conversationId;
+
+            console.log(
+              `${socket.user.username} joined ${conversation.name}`
+            );
+
+            sendAcknowledgement(
+              acknowledge,
+              {
+                success: true,
+                conversationId,
+                message:
+                  `Joined ${conversation.name}`,
+              }
+            );
+          } catch (error) {
+            console.error(
+              "Conversation join failed:",
+              error.message
+            );
+
+            sendAcknowledgement(
+              acknowledge,
+              {
+                success: false,
+                message:
+                  "Unable to join conversation",
+              }
+            );
+          }
+        }
+      );
+
+      socket.on(
+        "conversation:leave",
+        (
+          payload = {},
+          acknowledge
+        ) => {
+          const conversationId =
+            payload.conversationId ||
+            socket.activeConversationId;
+
+          if (!conversationId) {
+            return sendAcknowledgement(
+              acknowledge,
+              {
+                success: false,
+                message:
+                  "No active conversation",
+              }
             );
           }
 
-          socket.join(
-            getSocketRoomName(conversationId)
+          socket.leave(
+            getSocketRoomName(
+              conversationId
+            )
           );
 
-          socket.activeConversationId = conversationId;
+          if (
+            socket.activeConversationId ===
+            conversationId
+          ) {
+            socket.activeConversationId =
+              null;
+          }
 
-          console.log(
-            `${socket.user.username} joined ${conversation.name}`
+          sendAcknowledgement(
+            acknowledge,
+            {
+              success: true,
+              conversationId,
+            }
           );
-
-          sendAcknowledgement(acknowledge, {
-            success: true,
-            conversationId,
-            message: `Joined ${conversation.name}`,
-          });
-
-          socket.emit("conversation:joined", {
-            conversationId,
-            name: conversation.name,
-          });
-        } catch (error) {
-          console.error(
-            "Conversation join failed:",
-            error.message
-          );
-
-          sendAcknowledgement(acknowledge, {
-            success: false,
-            message: "Unable to join conversation",
-          });
         }
-      }
-    );
-
-    socket.on(
-      "conversation:leave",
-      (payload = {}, acknowledge) => {
-        const conversationId =
-          payload.conversationId ||
-          socket.activeConversationId;
-
-        if (!conversationId) {
-          return sendAcknowledgement(acknowledge, {
-            success: false,
-            message: "No active conversation",
-          });
-        }
-
-        socket.leave(
-          getSocketRoomName(conversationId)
-        );
-
-        if (
-          socket.activeConversationId === conversationId
-        ) {
-          socket.activeConversationId = null;
-        }
-
-        sendAcknowledgement(acknowledge, {
-          success: true,
-          conversationId,
-        });
-      }
-    );
-
-    socket.on("disconnect", (reason) => {
-      console.log(
-        `Socket disconnected: ${socket.user.username}. Reason: ${reason}`
       );
-    });
-  });
+
+      socket.on(
+        "message:send",
+        async (
+          payload = {},
+          acknowledge
+        ) => {
+          const validatedPayload =
+            validateMessagePayload(
+              payload
+            );
+
+          if (
+            !validatedPayload.success
+          ) {
+            return sendAcknowledgement(
+              acknowledge,
+              validatedPayload
+            );
+          }
+
+          const {
+            conversationId,
+            clientMessageId,
+            content,
+          } = validatedPayload;
+
+          try {
+            /*
+             * The user must first have
+             * successfully joined this
+             * conversation.
+             */
+            if (
+              socket.activeConversationId !==
+              conversationId
+            ) {
+              return sendAcknowledgement(
+                acknowledge,
+                {
+                  success: false,
+                  code:
+                    "CONVERSATION_NOT_JOINED",
+                  message:
+                    "Join the conversation before sending messages",
+                }
+              );
+            }
+
+            /*
+             * Authorization is checked
+             * again when sending.
+             *
+             * Never trust a previous
+             * authorization forever.
+             */
+            const conversation =
+              await Conversation.findById(
+                conversationId
+              );
+
+            if (!conversation) {
+              return sendAcknowledgement(
+                acknowledge,
+                {
+                  success: false,
+                  message:
+                    "Conversation not found",
+                }
+              );
+            }
+
+            if (
+              !canAccessConversation(
+                conversation,
+                socket.user.id
+              )
+            ) {
+              return sendAcknowledgement(
+                acknowledge,
+                {
+                  success: false,
+                  message:
+                    "You do not have access to this conversation",
+                }
+              );
+            }
+
+            /*
+             * Fast duplicate check.
+             */
+            const existingMessage =
+              await getExistingMessage({
+                senderId:
+                  socket.user.id,
+                clientMessageId,
+              });
+
+            if (existingMessage) {
+              return handleExistingMessage({
+                existingMessage,
+                conversationId,
+                content,
+                acknowledge,
+              });
+            }
+
+            let message;
+
+            try {
+              message =
+                await Message.create({
+                  conversation:
+                    conversationId,
+
+                  sender:
+                    socket.user.id,
+
+                  content,
+
+                  clientMessageId,
+                });
+            } catch (databaseError) {
+              /*
+               * Handles a race where two
+               * identical requests arrive
+               * before either initial
+               * duplicate lookup finishes.
+               */
+              if (
+                databaseError.code ===
+                11000
+              ) {
+                const duplicateMessage =
+                  await getExistingMessage(
+                    {
+                      senderId:
+                        socket.user.id,
+
+                      clientMessageId,
+                    }
+                  );
+
+                if (
+                  duplicateMessage
+                ) {
+                  return handleExistingMessage(
+                    {
+                      existingMessage:
+                        duplicateMessage,
+
+                      conversationId,
+                      content,
+                      acknowledge,
+                    }
+                  );
+                }
+              }
+
+              throw databaseError;
+            }
+
+            await message.populate(
+              "sender",
+              "_id name username"
+            );
+
+            const serializedMessage =
+              serializeMessage(message);
+
+            /*
+             * Save succeeded.
+             * NOW broadcast.
+             */
+            io.to(
+              getSocketRoomName(
+                conversationId
+              )
+            ).emit(
+              "message:new",
+              serializedMessage
+            );
+
+            sendAcknowledgement(
+              acknowledge,
+              {
+                success: true,
+                duplicate: false,
+                message:
+                  serializedMessage,
+              }
+            );
+          } catch (error) {
+            console.error(
+              "Message send failed:",
+              error
+            );
+
+            sendAcknowledgement(
+              acknowledge,
+              {
+                success: false,
+                message:
+                  "Unable to send message",
+              }
+            );
+          }
+        }
+      );
+
+      socket.on(
+        "disconnect",
+        (reason) => {
+          console.log(
+            `Socket disconnected: ${socket.user.username}. Reason: ${reason}`
+          );
+        }
+      );
+    }
+  );
 }
