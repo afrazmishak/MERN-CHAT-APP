@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -185,6 +186,13 @@ function ChatPage() {
       ] ?? []
       : [];
 
+  const typingUsers =
+    selectedConversationId
+      ? typingUsersByConversation[
+      selectedConversationId
+      ] ?? []
+      : [];
+
   const loadingMessages =
     Boolean(
       selectedConversationId &&
@@ -192,6 +200,26 @@ function ChatPage() {
       selectedConversationId
       ]
     );
+
+  const [
+    typingUsersByConversation,
+    setTypingUsersByConversation,
+  ] = useState({});
+
+  const typingStopTimerRef =
+    useRef(null);
+
+  const typingConversationIdRef =
+    useRef(null);
+
+  const typingStartedRef =
+    useRef(false);
+
+  const lastTypingStartEmitAtRef =
+    useRef(0);
+
+  const typingExpiryTimersRef =
+    useRef(new Map());
 
   let roomConnectionState =
     "disconnected";
@@ -216,6 +244,44 @@ function ChatPage() {
       roomConnectionState =
         "joining";
     }
+  }
+
+  function stopCurrentTyping() {
+    if (
+      typingStopTimerRef.current
+    ) {
+      clearTimeout(
+        typingStopTimerRef.current
+      );
+
+      typingStopTimerRef.current =
+        null;
+    }
+
+    const conversationId =
+      typingConversationIdRef.current;
+
+    if (
+      typingStartedRef.current &&
+      conversationId &&
+      socket.connected
+    ) {
+      socket.emit(
+        "typing:stop",
+        {
+          conversationId,
+        }
+      );
+    }
+
+    typingStartedRef.current =
+      false;
+
+    typingConversationIdRef.current =
+      null;
+
+    lastTypingStartEmitAtRef.current =
+      0;
   }
 
   /*
@@ -463,6 +529,161 @@ function ChatPage() {
       handleNewMessage
     );
 
+    useEffect(() => {
+      function removeTypingUser(
+        conversationId,
+        userId
+      ) {
+        setTypingUsersByConversation(
+          (currentState) => {
+            const currentUsers =
+              currentState[
+              conversationId
+              ] ?? [];
+
+            const nextUsers =
+              currentUsers.filter(
+                (typingUser) =>
+                  typingUser.id !==
+                  userId
+              );
+
+            return {
+              ...currentState,
+
+              [conversationId]:
+                nextUsers,
+            };
+          }
+        );
+      }
+
+      function handleTypingUpdate(
+        payload
+      ) {
+        const conversationId =
+          payload?.conversationId;
+
+        const typingUser =
+          payload?.user;
+
+        if (
+          !conversationId ||
+          !typingUser?.id
+        ) {
+          return;
+        }
+
+        /*
+         * Never show:
+         * "You are typing..."
+         */
+        if (
+          typingUser.id === user.id
+        ) {
+          return;
+        }
+
+        const timerKey =
+          `${conversationId}:${typingUser.id}`;
+
+        const existingTimer =
+          typingExpiryTimersRef.current.get(
+            timerKey
+          );
+
+        if (existingTimer) {
+          clearTimeout(
+            existingTimer
+          );
+
+          typingExpiryTimersRef.current.delete(
+            timerKey
+          );
+        }
+
+        if (!payload.isTyping) {
+          removeTypingUser(
+            conversationId,
+            typingUser.id
+          );
+
+          return;
+        }
+
+        setTypingUsersByConversation(
+          (currentState) => {
+            const currentUsers =
+              currentState[
+              conversationId
+              ] ?? [];
+
+            const alreadyPresent =
+              currentUsers.some(
+                (currentUser) =>
+                  currentUser.id ===
+                  typingUser.id
+              );
+
+            if (alreadyPresent) {
+              return currentState;
+            }
+
+            return {
+              ...currentState,
+
+              [conversationId]: [
+                ...currentUsers,
+                typingUser,
+              ],
+            };
+          }
+        );
+
+        /*
+         * Safety net against a stale
+         * typing indicator.
+         */
+        const expiryTimer =
+          setTimeout(() => {
+            removeTypingUser(
+              conversationId,
+              typingUser.id
+            );
+
+            typingExpiryTimersRef.current.delete(
+              timerKey
+            );
+          }, 5000);
+
+        typingExpiryTimersRef.current.set(
+          timerKey,
+          expiryTimer
+        );
+      }
+
+      socket.on(
+        "typing:update",
+        handleTypingUpdate
+      );
+
+      return () => {
+        socket.off(
+          "typing:update",
+          handleTypingUpdate
+        );
+
+        for (
+          const timer of
+          typingExpiryTimersRef.current.values()
+        ) {
+          clearTimeout(timer);
+        }
+
+        typingExpiryTimersRef.current.clear();
+      };
+    }, [user.id]);
+
     return () => {
       socket.off(
         "message:new",
@@ -610,6 +831,8 @@ function ChatPage() {
       return;
     }
 
+    stopCurrentTyping();
+
     setError("");
 
     setJoinFailedConversationId(
@@ -729,6 +952,8 @@ function ChatPage() {
       return;
     }
 
+    stopCurrentTyping();
+
     const clientMessageId =
       createClientMessageId();
 
@@ -803,7 +1028,84 @@ function ChatPage() {
       );
   }
 
+  function handleMessageDraftChange(
+    event
+  ) {
+    const value =
+      event.target.value;
+
+    setMessageDraft(value);
+
+    if (
+      roomConnectionState !==
+      "joined" ||
+      !selectedConversationId
+    ) {
+      stopCurrentTyping();
+      return;
+    }
+
+    if (!value.trim()) {
+      stopCurrentTyping();
+      return;
+    }
+
+    if (
+      typingConversationIdRef.current &&
+      typingConversationIdRef.current !==
+      selectedConversationId
+    ) {
+      stopCurrentTyping();
+    }
+
+    const now = Date.now();
+
+    /*
+     * Start immediately, then refresh
+     * at most once every 2 seconds
+     * while typing continues.
+     */
+    if (
+      !typingStartedRef.current ||
+      now -
+      lastTypingStartEmitAtRef.current >=
+      2000
+    ) {
+      socket.volatile.emit(
+        "typing:start",
+        {
+          conversationId:
+            selectedConversationId,
+        }
+      );
+
+      typingStartedRef.current =
+        true;
+
+      typingConversationIdRef.current =
+        selectedConversationId;
+
+      lastTypingStartEmitAtRef.current =
+        now;
+    }
+
+    if (
+      typingStopTimerRef.current
+    ) {
+      clearTimeout(
+        typingStopTimerRef.current
+      );
+    }
+
+    typingStopTimerRef.current =
+      setTimeout(() => {
+        stopCurrentTyping();
+      }, 1200);
+  }
+
   async function handleLogout() {
+    stopCurrentTyping();
+
     setError("");
 
     try {
@@ -1207,10 +1509,8 @@ function ChatPage() {
                 value={
                   messageDraft
                 }
-                onChange={(event) =>
-                  setMessageDraft(
-                    event.target.value
-                  )
+                onChange={
+                  handleMessageDraftChange
                 }
                 placeholder={`Message #${selectedConversation.name}`}
                 maxLength="4000"

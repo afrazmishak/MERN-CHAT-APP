@@ -19,6 +19,10 @@ import {
   createPresenceStore,
 } from "./presenceStore.js";
 
+import {
+  createTypingStore,
+} from "./typingStore.js";
+
 function getSocketRoomName(
   conversationId
 ) {
@@ -177,7 +181,81 @@ export function registerSocketHandlers(
   const presenceStore =
     createPresenceStore();
 
+  const typingStore =
+    createTypingStore();
+
   io.use(authenticateSocket);
+
+  function sendTypingStart(
+    socket,
+    conversationId
+  ) {
+    typingStore.startTyping(
+      conversationId,
+      socket.user.id,
+      socket.id
+    );
+
+    socket
+      .to(
+        getSocketRoomName(
+          conversationId
+        )
+      )
+      .volatile.emit(
+        "typing:update",
+        {
+          conversationId,
+
+          user: {
+            id: socket.user.id,
+            name: socket.user.name,
+            username:
+              socket.user.username,
+          },
+
+          isTyping: true,
+        }
+      );
+  }
+
+  function sendTypingStop(
+    socket,
+    conversationId
+  ) {
+    const result =
+      typingStore.stopTyping(
+        conversationId,
+        socket.user.id,
+        socket.id
+      );
+
+    if (!result.becameStopped) {
+      return;
+    }
+
+    socket
+      .to(
+        getSocketRoomName(
+          conversationId
+        )
+      )
+      .emit(
+        "typing:update",
+        {
+          conversationId,
+
+          user: {
+            id: socket.user.id,
+            name: socket.user.name,
+            username:
+              socket.user.username,
+          },
+
+          isTyping: false,
+        }
+      );
+  }
 
   io.on(
     "connection",
@@ -294,9 +372,17 @@ export function registerSocketHandlers(
               socket.activeConversationId !==
               conversationId
             ) {
+              const previousConversationId =
+                socket.activeConversationId;
+
+              sendTypingStop(
+                socket,
+                previousConversationId
+              );
+
               socket.leave(
                 getSocketRoomName(
-                  socket.activeConversationId
+                  previousConversationId
                 )
               );
             }
@@ -361,6 +447,11 @@ export function registerSocketHandlers(
               }
             );
           }
+
+          sendTypingStop(
+            socket,
+            conversationId
+          );
 
           socket.leave(
             getSocketRoomName(
@@ -596,6 +687,20 @@ export function registerSocketHandlers(
       );
 
       socket.on(
+        "disconnecting",
+        () => {
+          if (
+            socket.activeConversationId
+          ) {
+            sendTypingStop(
+              socket,
+              socket.activeConversationId
+            );
+          }
+        }
+      );
+
+      socket.on(
         "disconnect",
         (reason) => {
           const presenceResult =
@@ -623,6 +728,59 @@ export function registerSocketHandlers(
 
           console.log(
             `Socket disconnected: ${socket.user.username}. Reason: ${reason}`
+          );
+        }
+      );
+
+      socket.on(
+        "typing:start",
+        (payload = {}) => {
+          const {
+            conversationId,
+          } = payload;
+
+          if (
+            !conversationId ||
+            !mongoose.isValidObjectId(
+              conversationId
+            )
+          ) {
+            return;
+          }
+
+          if (
+            socket.activeConversationId !==
+            conversationId
+          ) {
+            return;
+          }
+
+          sendTypingStart(
+            socket,
+            conversationId
+          );
+        }
+      );
+
+      socket.on(
+        "typing:stop",
+        (payload = {}) => {
+          const {
+            conversationId,
+          } = payload;
+
+          if (
+            !conversationId ||
+            !mongoose.isValidObjectId(
+              conversationId
+            )
+          ) {
+            return;
+          }
+
+          sendTypingStop(
+            socket,
+            conversationId
           );
         }
       );
