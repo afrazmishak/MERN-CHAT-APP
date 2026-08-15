@@ -36,11 +36,18 @@ async function startServer() {
   const httpServer = http.createServer(app);
 
   const io = new Server(httpServer, {
-    cors: {
-      origin: process.env.CLIENT_URL,
-      credentials: true,
-    },
-  });
+  cors: {
+    origin: process.env.CLIENT_URL,
+    credentials: true,
+  },
+
+  connectionStateRecovery: {
+    maxDisconnectionDuration:
+      2 * 60 * 1000,
+
+    skipMiddlewares: false,
+  },
+});
 
   registerSocketHandlers(io);
 

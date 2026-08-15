@@ -687,3 +687,35 @@ a {
   background: #fff0f0;
   color: #a02020;
 }
+
+.message-avatar-wrapper,
+.sidebar-avatar-wrapper {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.message-presence,
+.sidebar-presence {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 11px;
+  height: 11px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+}
+
+.message-presence.online,
+.sidebar-presence.online {
+  background: #28b57a;
+}
+
+.message-presence.offline,
+.sidebar-presence.offline {
+  background: #a5adba;
+}
+
+.chat-sidebar
+  .sidebar-presence {
+  border-color: #131b2d;
+}

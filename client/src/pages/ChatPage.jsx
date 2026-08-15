@@ -164,6 +164,16 @@ function ChatPage() {
     setCreatingRoom,
   ] = useState(false);
 
+  const [
+    onlineUserIds,
+    setOnlineUserIds,
+  ] = useState([]);
+
+  const [
+    connectionVersion,
+    setConnectionVersion,
+  ] = useState(0);
+
   const selectedConversationId =
     selectedConversation?.id ??
     null;
@@ -171,16 +181,16 @@ function ChatPage() {
   const messages =
     selectedConversationId
       ? messagesByConversation[
-          selectedConversationId
-        ] ?? []
+      selectedConversationId
+      ] ?? []
       : [];
 
   const loadingMessages =
     Boolean(
       selectedConversationId &&
-        !loadedMessageHistory[
-          selectedConversationId
-        ]
+      !loadedMessageHistory[
+      selectedConversationId
+      ]
     );
 
   let roomConnectionState =
@@ -247,7 +257,7 @@ function ChatPage() {
           setError(
             requestError.response
               ?.data?.message ||
-              "Unable to load conversations"
+            "Unable to load conversations"
           );
         }
       )
@@ -270,7 +280,62 @@ function ChatPage() {
   useEffect(() => {
     function handleConnect() {
       setSocketConnected(true);
+
+      setConnectionVersion(
+        (currentVersion) =>
+          currentVersion + 1
+      );
+
       setError("");
+
+      console.log(
+        socket.recovered
+          ? "Socket connection recovered"
+          : "Socket connected with a new session"
+      );
+    }
+
+    function handlePresenceSnapshot(
+      payload
+    ) {
+      setOnlineUserIds(
+        Array.isArray(payload?.userIds)
+          ? payload.userIds
+          : []
+      );
+    }
+
+    function handlePresenceUpdate(
+      payload
+    ) {
+      if (!payload?.userId) {
+        return;
+      }
+
+      setOnlineUserIds(
+        (currentUserIds) => {
+          if (payload.isOnline) {
+            if (
+              currentUserIds.includes(
+                payload.userId
+              )
+            ) {
+              return currentUserIds;
+            }
+
+            return [
+              ...currentUserIds,
+              payload.userId,
+            ];
+          }
+
+          return currentUserIds.filter(
+            (userId) =>
+              userId !==
+              payload.userId
+          );
+        }
+      );
     }
 
     function handleDisconnect() {
@@ -279,6 +344,8 @@ function ChatPage() {
       setJoinedConversationId(
         null
       );
+
+      setOnlineUserIds([]);
     }
 
     function handleConnectionError(
@@ -292,7 +359,7 @@ function ChatPage() {
 
       setError(
         connectionError.message ||
-          "Socket connection failed"
+        "Socket connection failed"
       );
     }
 
@@ -309,6 +376,16 @@ function ChatPage() {
     socket.on(
       "connect_error",
       handleConnectionError
+    );
+
+    socket.on(
+      "presence:snapshot",
+      handlePresenceSnapshot
+    );
+
+    socket.on(
+      "presence:update",
+      handlePresenceUpdate
     );
 
     if (!socket.connected) {
@@ -329,6 +406,16 @@ function ChatPage() {
       socket.off(
         "connect_error",
         handleConnectionError
+      );
+
+      socket.off(
+        "presence:snapshot",
+        handlePresenceSnapshot
+      );
+
+      socket.off(
+        "presence:update",
+        handlePresenceUpdate
       );
 
       socket.disconnect();
@@ -353,8 +440,8 @@ function ChatPage() {
         (currentMessages) => {
           const conversationMessages =
             currentMessages[
-              message
-                .conversationId
+            message
+              .conversationId
             ] ?? [];
 
           return {
@@ -419,7 +506,7 @@ function ChatPage() {
 
           setError(
             result?.message ||
-              "Unable to join conversation"
+            "Unable to join conversation"
           );
 
           return;
@@ -449,16 +536,12 @@ function ChatPage() {
    * Load persistent history.
    */
   useEffect(() => {
-    if (
-      !selectedConversationId ||
-      loadedMessageHistory[
-        selectedConversationId
-      ]
-    ) {
+    if (!selectedConversationId) {
       return;
     }
 
-    let componentActive = true;
+    let componentActive =
+      true;
 
     apiClient
       .get(
@@ -480,9 +563,18 @@ function ChatPage() {
               mergeMessages(
                 loadedMessages,
                 currentMessages[
-                  selectedConversationId
+                selectedConversationId
                 ] ?? []
               ),
+          })
+        );
+
+        setLoadedMessageHistory(
+          (currentState) => ({
+            ...currentState,
+
+            [selectedConversationId]:
+              true,
           })
         );
       })
@@ -495,31 +587,17 @@ function ChatPage() {
           setError(
             requestError.response
               ?.data?.message ||
-              "Unable to load message history"
+            "Unable to synchronize message history"
           );
         }
-      )
-      .finally(() => {
-        if (!componentActive) {
-          return;
-        }
-
-        setLoadedMessageHistory(
-          (currentState) => ({
-            ...currentState,
-
-            [selectedConversationId]:
-              true,
-          })
-        );
-      });
+      );
 
     return () => {
       componentActive = false;
     };
   }, [
     selectedConversationId,
-    loadedMessageHistory,
+    connectionVersion,
   ]);
 
   function selectConversation(
@@ -584,9 +662,9 @@ function ChatPage() {
         (
           currentConversations
         ) => [
-          ...currentConversations,
-          createdRoom,
-        ]
+            ...currentConversations,
+            createdRoom,
+          ]
       );
 
       setMessagesByConversation(
@@ -617,7 +695,7 @@ function ChatPage() {
       setError(
         requestError.response
           ?.data?.message ||
-          "Unable to create room"
+        "Unable to create room"
       );
     } finally {
       setCreatingRoom(false);
@@ -686,7 +764,7 @@ function ChatPage() {
           if (!result?.success) {
             setError(
               result?.message ||
-                "Unable to send message"
+              "Unable to send message"
             );
 
             return;
@@ -710,7 +788,7 @@ function ChatPage() {
                 [selectedConversationId]:
                   mergeMessages(
                     currentMessages[
-                      selectedConversationId
+                    selectedConversationId
                     ] ?? [],
                     [
                       result.message,
@@ -738,9 +816,17 @@ function ChatPage() {
       setError(
         requestError.response
           ?.data?.message ||
-          "Unable to log out"
+        "Unable to log out"
       );
     }
+  }
+
+  function isUserOnline(
+    userId
+  ) {
+    return onlineUserIds.includes(
+      userId
+    );
   }
 
   return (
@@ -858,7 +944,7 @@ function ChatPage() {
                   }
                   className={
                     selectedConversationId ===
-                    conversation.id
+                      conversation.id
                       ? "conversation-item active"
                       : "conversation-item"
                   }
@@ -870,7 +956,7 @@ function ChatPage() {
                 >
                   <span className="conversation-icon">
                     {conversation.type ===
-                    "room"
+                      "room"
                       ? "#"
                       : "@"}
                   </span>
@@ -895,10 +981,20 @@ function ChatPage() {
 
         <footer className="sidebar-footer">
           <div className="current-user">
-            <div className="user-avatar">
-              {user.name
-                .charAt(0)
-                .toUpperCase()}
+            <div className="sidebar-avatar-wrapper">
+              <div className="user-avatar">
+                {user.name
+                  .charAt(0)
+                  .toUpperCase()}
+              </div>
+
+              <span
+                className={
+                  socketConnected
+                    ? "sidebar-presence online"
+                    : "sidebar-presence offline"
+                }
+              />
             </div>
 
             <div>
@@ -1037,12 +1133,29 @@ function ChatPage() {
                             : "message-row"
                         }
                       >
-                        <div className="message-avatar">
-                          {message.sender.name
-                            .charAt(
-                              0
-                            )
-                            .toUpperCase()}
+                        <div className="message-avatar-wrapper">
+                          <div className="message-avatar">
+                            {message.sender.name
+                              .charAt(0)
+                              .toUpperCase()}
+                          </div>
+
+                          <span
+                            className={
+                              isUserOnline(
+                                message.sender.id
+                              )
+                                ? "message-presence online"
+                                : "message-presence offline"
+                            }
+                            title={
+                              isUserOnline(
+                                message.sender.id
+                              )
+                                ? "Online"
+                                : "Offline"
+                            }
+                          />
                         </div>
 
                         <div className="message-body">
@@ -1104,7 +1217,7 @@ function ChatPage() {
                 rows="1"
                 disabled={
                   roomConnectionState !==
-                    "joined" ||
+                  "joined" ||
                   sendingMessage
                 }
               />
@@ -1113,7 +1226,7 @@ function ChatPage() {
                 type="submit"
                 disabled={
                   roomConnectionState !==
-                    "joined" ||
+                  "joined" ||
                   sendingMessage ||
                   !messageDraft.trim()
                 }

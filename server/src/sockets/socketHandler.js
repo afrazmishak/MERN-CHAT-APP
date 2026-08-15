@@ -15,6 +15,10 @@ import {
   serializeMessage,
 } from "../utils/serializeMessage.js";
 
+import {
+  createPresenceStore,
+} from "./presenceStore.js";
+
 function getSocketRoomName(
   conversationId
 ) {
@@ -37,13 +41,13 @@ function validateMessagePayload(
 ) {
   const conversationId =
     typeof payload.conversationId ===
-    "string"
+      "string"
       ? payload.conversationId.trim()
       : "";
 
   const clientMessageId =
     typeof payload.clientMessageId ===
-    "string"
+      "string"
       ? payload.clientMessageId.trim()
       : "";
 
@@ -132,7 +136,7 @@ function handleExistingMessage({
 
   if (
     existingConversationId !==
-      conversationId ||
+    conversationId ||
     existingMessage.content !== content
   ) {
     sendAcknowledgement(
@@ -170,6 +174,9 @@ function handleExistingMessage({
 export function registerSocketHandlers(
   io
 ) {
+  const presenceStore =
+    createPresenceStore();
+
   io.use(authenticateSocket);
 
   io.on(
@@ -182,6 +189,36 @@ export function registerSocketHandlers(
       socket.join(
         `user:${socket.user.id}`
       );
+
+      const presenceResult =
+        presenceStore.addConnection(
+          socket.user.id,
+          socket.id
+        );
+
+      socket.emit(
+        "presence:snapshot",
+        {
+          userIds:
+            presenceStore.getOnlineUserIds(),
+        }
+      );
+
+      if (
+        presenceResult.becameOnline
+      ) {
+        io.emit(
+          "presence:update",
+          {
+            userId: socket.user.id,
+            isOnline: true,
+          }
+        );
+
+        console.log(
+          `${socket.user.username} is online`
+        );
+      }
 
       socket.emit(
         "connection:ready",
@@ -255,7 +292,7 @@ export function registerSocketHandlers(
             if (
               socket.activeConversationId &&
               socket.activeConversationId !==
-                conversationId
+              conversationId
             ) {
               socket.leave(
                 getSocketRoomName(
@@ -561,6 +598,29 @@ export function registerSocketHandlers(
       socket.on(
         "disconnect",
         (reason) => {
+          const presenceResult =
+            presenceStore.removeConnection(
+              socket.user.id,
+              socket.id
+            );
+
+          if (
+            presenceResult.becameOffline
+          ) {
+            io.emit(
+              "presence:update",
+              {
+                userId:
+                  socket.user.id,
+                isOnline: false,
+              }
+            );
+
+            console.log(
+              `${socket.user.username} is offline`
+            );
+          }
+
           console.log(
             `Socket disconnected: ${socket.user.username}. Reason: ${reason}`
           );
