@@ -407,11 +407,37 @@ function ChatPage() {
     function handleDisconnect() {
       setSocketConnected(false);
 
-      setJoinedConversationId(
-        null
-      );
+      setJoinedConversationId(null);
 
       setOnlineUserIds([]);
+
+      if (typingStopTimerRef.current) {
+        clearTimeout(
+          typingStopTimerRef.current
+        );
+
+        typingStopTimerRef.current =
+          null;
+      }
+
+      typingStartedRef.current = false;
+
+      typingConversationIdRef.current =
+        null;
+
+      lastTypingStartEmitAtRef.current =
+        0;
+
+      for (
+        const timer of
+        typingExpiryTimersRef.current.values()
+      ) {
+        clearTimeout(timer);
+      }
+
+      typingExpiryTimersRef.current.clear();
+
+      setTypingUsersByConversation({});
     }
 
     function handleConnectionError(
@@ -1131,6 +1157,29 @@ function ChatPage() {
     );
   }
 
+  function getTypingText() {
+    if (
+      typingUsers.length === 0
+    ) {
+      return "";
+    }
+
+    if (
+      typingUsers.length === 1
+    ) {
+      return `${typingUsers[0].name} is typing...`;
+    }
+
+    if (
+      typingUsers.length === 2
+    ) {
+      return `${typingUsers[0].name} and ${typingUsers[1].name} are typing...`;
+    }
+
+    return `${typingUsers[0].name}, ${typingUsers[1].name} and ${typingUsers.length - 2
+      } others are typing...`;
+  }
+
   return (
     <main className="chat-app">
       <aside className="chat-sidebar">
@@ -1499,8 +1548,14 @@ function ChatPage() {
               )}
             </div>
 
-            <form
-              className="message-composer"
+            <div
+              className="typing-indicator"
+              aria-live="polite"
+            >
+              {getTypingText()}
+            </div>
+
+            <form className="message-composer"
               onSubmit={
                 handleSendMessage
               }
