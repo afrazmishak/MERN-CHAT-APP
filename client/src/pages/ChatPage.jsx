@@ -175,9 +175,29 @@ function ChatPage() {
     setConnectionVersion,
   ] = useState(0);
 
+  const [
+    typingUsersByConversation,
+    setTypingUsersByConversation,
+  ] = useState({});
+
   const selectedConversationId =
     selectedConversation?.id ??
     null;
+
+  const typingStopTimerRef =
+    useRef(null);
+
+  const typingConversationIdRef =
+    useRef(null);
+
+  const typingStartedRef =
+    useRef(false);
+
+  const lastTypingStartEmitAtRef =
+    useRef(0);
+
+  const typingExpiryTimersRef =
+    useRef(new Map());
 
   const messages =
     selectedConversationId
@@ -200,26 +220,6 @@ function ChatPage() {
       selectedConversationId
       ]
     );
-
-  const [
-    typingUsersByConversation,
-    setTypingUsersByConversation,
-  ] = useState({});
-
-  const typingStopTimerRef =
-    useRef(null);
-
-  const typingConversationIdRef =
-    useRef(null);
-
-  const typingStartedRef =
-    useRef(false);
-
-  const lastTypingStartEmitAtRef =
-    useRef(0);
-
-  const typingExpiryTimersRef =
-    useRef(new Map());
 
   let roomConnectionState =
     "disconnected";
@@ -555,161 +555,6 @@ function ChatPage() {
       handleNewMessage
     );
 
-    useEffect(() => {
-      function removeTypingUser(
-        conversationId,
-        userId
-      ) {
-        setTypingUsersByConversation(
-          (currentState) => {
-            const currentUsers =
-              currentState[
-              conversationId
-              ] ?? [];
-
-            const nextUsers =
-              currentUsers.filter(
-                (typingUser) =>
-                  typingUser.id !==
-                  userId
-              );
-
-            return {
-              ...currentState,
-
-              [conversationId]:
-                nextUsers,
-            };
-          }
-        );
-      }
-
-      function handleTypingUpdate(
-        payload
-      ) {
-        const conversationId =
-          payload?.conversationId;
-
-        const typingUser =
-          payload?.user;
-
-        if (
-          !conversationId ||
-          !typingUser?.id
-        ) {
-          return;
-        }
-
-        /*
-         * Never show:
-         * "You are typing..."
-         */
-        if (
-          typingUser.id === user.id
-        ) {
-          return;
-        }
-
-        const timerKey =
-          `${conversationId}:${typingUser.id}`;
-
-        const existingTimer =
-          typingExpiryTimersRef.current.get(
-            timerKey
-          );
-
-        if (existingTimer) {
-          clearTimeout(
-            existingTimer
-          );
-
-          typingExpiryTimersRef.current.delete(
-            timerKey
-          );
-        }
-
-        if (!payload.isTyping) {
-          removeTypingUser(
-            conversationId,
-            typingUser.id
-          );
-
-          return;
-        }
-
-        setTypingUsersByConversation(
-          (currentState) => {
-            const currentUsers =
-              currentState[
-              conversationId
-              ] ?? [];
-
-            const alreadyPresent =
-              currentUsers.some(
-                (currentUser) =>
-                  currentUser.id ===
-                  typingUser.id
-              );
-
-            if (alreadyPresent) {
-              return currentState;
-            }
-
-            return {
-              ...currentState,
-
-              [conversationId]: [
-                ...currentUsers,
-                typingUser,
-              ],
-            };
-          }
-        );
-
-        /*
-         * Safety net against a stale
-         * typing indicator.
-         */
-        const expiryTimer =
-          setTimeout(() => {
-            removeTypingUser(
-              conversationId,
-              typingUser.id
-            );
-
-            typingExpiryTimersRef.current.delete(
-              timerKey
-            );
-          }, 5000);
-
-        typingExpiryTimersRef.current.set(
-          timerKey,
-          expiryTimer
-        );
-      }
-
-      socket.on(
-        "typing:update",
-        handleTypingUpdate
-      );
-
-      return () => {
-        socket.off(
-          "typing:update",
-          handleTypingUpdate
-        );
-
-        for (
-          const timer of
-          typingExpiryTimersRef.current.values()
-        ) {
-          clearTimeout(timer);
-        }
-
-        typingExpiryTimersRef.current.clear();
-      };
-    }, [user.id]);
-
     return () => {
       socket.off(
         "message:new",
@@ -717,6 +562,161 @@ function ChatPage() {
       );
     };
   }, []);
+
+  useEffect(() => {
+    function removeTypingUser(
+      conversationId,
+      userId
+    ) {
+      setTypingUsersByConversation(
+        (currentState) => {
+          const currentUsers =
+            currentState[
+            conversationId
+            ] ?? [];
+
+          const nextUsers =
+            currentUsers.filter(
+              (typingUser) =>
+                typingUser.id !==
+                userId
+            );
+
+          return {
+            ...currentState,
+
+            [conversationId]:
+              nextUsers,
+          };
+        }
+      );
+    }
+
+    function handleTypingUpdate(
+      payload
+    ) {
+      const conversationId =
+        payload?.conversationId;
+
+      const typingUser =
+        payload?.user;
+
+      if (
+        !conversationId ||
+        !typingUser?.id
+      ) {
+        return;
+      }
+
+      /*
+       * Never show:
+       * "You are typing..."
+       */
+      if (
+        typingUser.id === user.id
+      ) {
+        return;
+      }
+
+      const timerKey =
+        `${conversationId}:${typingUser.id}`;
+
+      const existingTimer =
+        typingExpiryTimersRef.current.get(
+          timerKey
+        );
+
+      if (existingTimer) {
+        clearTimeout(
+          existingTimer
+        );
+
+        typingExpiryTimersRef.current.delete(
+          timerKey
+        );
+      }
+
+      if (!payload.isTyping) {
+        removeTypingUser(
+          conversationId,
+          typingUser.id
+        );
+
+        return;
+      }
+
+      setTypingUsersByConversation(
+        (currentState) => {
+          const currentUsers =
+            currentState[
+            conversationId
+            ] ?? [];
+
+          const alreadyPresent =
+            currentUsers.some(
+              (currentUser) =>
+                currentUser.id ===
+                typingUser.id
+            );
+
+          if (alreadyPresent) {
+            return currentState;
+          }
+
+          return {
+            ...currentState,
+
+            [conversationId]: [
+              ...currentUsers,
+              typingUser,
+            ],
+          };
+        }
+      );
+
+      /*
+       * Safety net against a stale
+       * typing indicator.
+       */
+      const expiryTimer =
+        setTimeout(() => {
+          removeTypingUser(
+            conversationId,
+            typingUser.id
+          );
+
+          typingExpiryTimersRef.current.delete(
+            timerKey
+          );
+        }, 5000);
+
+      typingExpiryTimersRef.current.set(
+        timerKey,
+        expiryTimer
+      );
+    }
+
+    socket.on(
+      "typing:update",
+      handleTypingUpdate
+    );
+
+    return () => {
+      socket.off(
+        "typing:update",
+        handleTypingUpdate
+      );
+
+      for (
+        const timer of
+        typingExpiryTimersRef.current.values()
+      ) {
+        clearTimeout(timer);
+      }
+
+      typingExpiryTimersRef.current.clear();
+    };
+  }, [user.id]);
 
   /*
    * Join selected conversation.
@@ -1158,21 +1158,15 @@ function ChatPage() {
   }
 
   function getTypingText() {
-    if (
-      typingUsers.length === 0
-    ) {
+    if (typingUsers.length === 0) {
       return "";
     }
 
-    if (
-      typingUsers.length === 1
-    ) {
+    if (typingUsers.length === 1) {
       return `${typingUsers[0].name} is typing...`;
     }
 
-    if (
-      typingUsers.length === 2
-    ) {
+    if (typingUsers.length === 2) {
       return `${typingUsers[0].name} and ${typingUsers[1].name} are typing...`;
     }
 
