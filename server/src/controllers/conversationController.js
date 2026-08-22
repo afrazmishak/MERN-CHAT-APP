@@ -2,6 +2,8 @@ import mongoose from "mongoose";
 
 import Conversation from "../models/Conversation.js"
 import AppError from "../utils/AppError.js"
+import Message from "../models/Message.js";
+import ConversationState from "../models/ConversationState.js";
 import { asyncHandler } from "../utils/asyncHandler.js"
 import { canAccessConversation } from "../utils/conversationAccess.js"
 
@@ -22,53 +24,156 @@ function serializeParticipant(participant) {
     };
 }
 
-function serializeConversation(conversation) {
+function serializeConversation(
+    conversation,
+    unreadCount = 0
+) {
     return {
-        id: conversation._id.toString(),
-        type: conversation.type,
-        name: conversation.name,
-        slug: conversation.slug,
-        description: conversation.description,
-        isPublic: conversation.isPublic,
-        participants: conversation.participants.map(
-            serializeParticipant
-        ),
-        createdAt: conversation.createdAt,
-        updatedAt: conversation.updatedAt,
+        id:
+            conversation._id.toString(),
+
+        type:
+            conversation.type,
+
+        name:
+            conversation.name,
+
+        slug:
+            conversation.slug,
+
+        description:
+            conversation.description,
+
+        isPublic:
+            conversation.isPublic,
+
+        participants:
+            conversation.participants.map(
+                serializeParticipant
+            ),
+
+        unreadCount,
+
+        createdAt:
+            conversation.createdAt,
+
+        updatedAt:
+            conversation.updatedAt,
     };
 }
 
-export const getConversations = asyncHandler(
-    async (request, response) => {
-        const conversations = await Conversation.find({
-            $or: [
-                {
-                    type: "room",
-                    isPublic: true,
-                },
-                {
-                    participants: request.user._id,
-                },
-            ],
-        })
-            .populate(
-                "participants",
-                "_id name username"
-            )
-            .sort({
-                type: -1,
-                name: 1,
-                updatedAt: -1,
-            });
+export const getConversations =
+    asyncHandler(
+        async (request, response) => {
+            const conversations =
+                await Conversation.find({
+                    $or: [
+                        {
+                            type: "room",
+                            isPublic: true,
+                        },
+                        {
+                            participants:
+                                request.user._id,
+                        },
+                    ],
+                })
+                    .populate(
+                        "participants",
+                        "_id name username"
+                    )
+                    .sort({
+                        type: -1,
+                        name: 1,
+                        updatedAt: -1,
+                    });
 
-        response.status(200).json({
-            success: true,
-            conversations: conversations.map(
-                serializeConversation
-            ),
-        });
-    }
-);
+            const conversationIds =
+                conversations.map(
+                    (conversation) =>
+                        conversation._id
+                );
+
+            const states =
+                await ConversationState.find({
+                    user:
+                        request.user._id,
+
+                    conversation: {
+                        $in:
+                            conversationIds,
+                    },
+                });
+
+            const stateMap =
+                new Map(
+                    states.map(
+                        (state) => [
+                            state.conversation
+                                .toString(),
+                            state,
+                        ]
+                    )
+                );
+
+            const serialized =
+                await Promise.all(
+                    conversations.map(
+                        async (
+                            conversation
+                        ) => {
+                            const state =
+                                stateMap.get(
+                                    conversation._id
+                                        .toString()
+                                );
+
+                            const unreadQuery = {
+                                conversation:
+                                    conversation._id,
+
+                                /*
+                                 * Your own messages
+                                 * are never unread.
+                                 */
+                                sender: {
+                                    $ne:
+                                        request.user._id,
+                                },
+                            };
+
+                            if (
+                                state
+                                    ?.lastReadMessage
+                            ) {
+                                unreadQuery._id = {
+                                    $gt:
+                                        state.lastReadMessage,
+                                };
+                            }
+
+                            const unreadCount =
+                                await Message.countDocuments(
+                                    unreadQuery
+                                );
+
+                            return serializeConversation(
+                                conversation,
+                                unreadCount
+                            );
+                        }
+                    )
+                );
+
+            response
+                .status(200)
+                .json({
+                    success: true,
+                    conversations:
+                        serialized,
+                });
+        }
+    );
 
 export const getConversation = asyncHandler(
     async (request, response) => {

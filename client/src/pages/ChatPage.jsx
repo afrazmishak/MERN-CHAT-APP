@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -9,9 +10,10 @@ import {
 } from "react-router-dom";
 
 import apiClient from "../api/apiClient";
+
 import {
   useAuth,
-} from "../context/AuthContext";
+} from "../context/useAuth";
 
 import socket from "../socket/socket";
 
@@ -180,9 +182,15 @@ function ChatPage() {
     setTypingUsersByConversation,
   ] = useState({});
 
-  const selectedConversationId =
-    selectedConversation?.id ??
-    null;
+  const [
+    unreadCounts,
+    setUnreadCounts,
+  ] = useState({});
+
+  const [
+    conversationStates,
+    setConversationStates,
+  ] = useState({});
 
   const typingStopTimerRef =
     useRef(null);
@@ -199,19 +207,45 @@ function ChatPage() {
   const typingExpiryTimersRef =
     useRef(new Map());
 
-  const messages =
-    selectedConversationId
-      ? messagesByConversation[
-      selectedConversationId
-      ] ?? []
-      : [];
+  const selectedConversationId =
+    selectedConversation?.id ??
+    null;
 
-  const typingUsers =
-    selectedConversationId
-      ? typingUsersByConversation[
-      selectedConversationId
-      ] ?? []
-      : [];
+  const messages = useMemo(
+    () => {
+      if (!selectedConversationId) {
+        return [];
+      }
+
+      return (
+        messagesByConversation[
+        selectedConversationId
+        ] ?? []
+      );
+    },
+    [
+      selectedConversationId,
+      messagesByConversation,
+    ]
+  );
+
+  const typingUsers = useMemo(
+    () => {
+      if (!selectedConversationId) {
+        return [];
+      }
+
+      return (
+        typingUsersByConversation[
+        selectedConversationId
+        ] ?? []
+      );
+    },
+    [
+      selectedConversationId,
+      typingUsersByConversation,
+    ]
+  );
 
   const loadingMessages =
     Boolean(
@@ -300,6 +334,20 @@ function ChatPage() {
         const loadedConversations =
           response.data
             .conversations;
+
+        const loadedUnreadCounts =
+          Object.fromEntries(
+            loadedConversations.map(
+              (conversation) => [
+                conversation.id,
+                conversation.unreadCount ?? 0,
+              ]
+            )
+          );
+
+        setUnreadCounts(
+          loadedUnreadCounts
+        );
 
         setConversations(
           loadedConversations
@@ -522,6 +570,19 @@ function ChatPage() {
     function handleNewMessage(
       message
     ) {
+      console.log(
+        "[message:new received]",
+        {
+          conversationId:
+            message?.conversationId,
+
+          selectedConversationId,
+
+          sender:
+            message?.sender?.username,
+        }
+      );
+
       if (
         !message?.conversationId
       ) {
@@ -548,6 +609,67 @@ function ChatPage() {
           };
         }
       );
+
+      if (
+        message.sender.id ===
+        user.id
+      ) {
+        return;
+      }
+
+      socket.emit(
+        "conversation:delivered",
+        {
+          conversationId:
+            message.conversationId,
+
+          messageId:
+            message.id,
+        }
+      );
+
+      const conversationIsOpen =
+        message.conversationId ===
+        selectedConversationId &&
+        document.visibilityState ===
+        "visible";
+
+      if (conversationIsOpen) {
+        socket.emit(
+          "conversation:read",
+          {
+            conversationId:
+              message.conversationId,
+
+            messageId:
+              message.id,
+          }
+        );
+
+        setUnreadCounts(
+          (currentCounts) => ({
+            ...currentCounts,
+
+            [message.conversationId]:
+              0,
+          })
+        );
+
+        return;
+      }
+
+      setUnreadCounts(
+        (currentCounts) => ({
+          ...currentCounts,
+
+          [message.conversationId]:
+            (
+              currentCounts[
+              message.conversationId
+              ] ?? 0
+            ) + 1,
+        })
+      );
     }
 
     socket.on(
@@ -561,7 +683,136 @@ function ChatPage() {
         handleNewMessage
       );
     };
-  }, []);
+  }, [
+    selectedConversationId,
+    user.id,
+  ]);
+
+  useEffect(() => {
+    function handleConversationState(
+      state
+    ) {
+      if (
+        !state?.conversationId ||
+        !state?.userId
+      ) {
+        return;
+      }
+
+      setConversationStates(
+        (currentState) => ({
+          ...currentState,
+
+          [state.conversationId]: {
+            ...currentState[
+            state.conversationId
+            ],
+
+            [state.userId]:
+              state,
+          },
+        })
+      );
+
+      /*
+       * Only an actual READ event
+       * clears unread messages.
+       *
+       * Delivery must NOT clear them.
+       */
+      if (
+        state.userId === user.id &&
+        state.receiptType === "read"
+      ) {
+        setUnreadCounts(
+          (currentCounts) => ({
+            ...currentCounts,
+
+            [state.conversationId]:
+              0,
+          })
+        );
+      }
+    }
+
+    socket.on(
+      "conversation:state",
+      handleConversationState
+    );
+
+    socket.on(
+      "conversation:receipt",
+      handleConversationState
+    );
+
+    return () => {
+      socket.off(
+        "conversation:state",
+        handleConversationState
+      );
+
+      socket.off(
+        "conversation:receipt",
+        handleConversationState
+      );
+    };
+  }, [user.id]);
+
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (
+        document.visibilityState !==
+        "visible" ||
+        !selectedConversationId
+      ) {
+        return;
+      }
+
+      const latestMessage =
+        messages[
+        messages.length - 1
+        ];
+
+      if (!latestMessage) {
+        return;
+      }
+
+      socket.emit(
+        "conversation:read",
+        {
+          conversationId:
+            selectedConversationId,
+
+          messageId:
+            latestMessage.id,
+        }
+      );
+
+      setUnreadCounts(
+        (currentCounts) => ({
+          ...currentCounts,
+
+          [selectedConversationId]:
+            0,
+        })
+      );
+    }
+
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange
+    );
+
+    return () => {
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
+    };
+  }, [
+    selectedConversationId,
+    messages,
+  ]);
 
   /*
  * Listen for typing updates.
@@ -799,6 +1050,69 @@ function ChatPage() {
         const loadedMessages =
           response.data.messages;
 
+        const loadedStates =
+          response.data.states ?? [];
+
+        setConversationStates(
+          (currentState) => ({
+            ...currentState,
+
+            [selectedConversationId]:
+              Object.fromEntries(
+                loadedStates.map(
+                  (state) => [
+                    state.userId,
+                    state,
+                  ]
+                )
+              ),
+          })
+        );
+
+        const latestMessage =
+          loadedMessages[
+          loadedMessages.length - 1
+          ];
+
+        if (
+          latestMessage &&
+          socket.connected
+        ) {
+          socket.emit(
+            "conversation:delivered",
+            {
+              conversationId:
+                selectedConversationId,
+
+              messageId:
+                latestMessage.id,
+            }
+          );
+
+          if (
+            document.visibilityState ===
+            "visible"
+          ) {
+            socket.emit(
+              "conversation:read",
+              {
+                conversationId:
+                  selectedConversationId,
+
+                messageId:
+                  latestMessage.id,
+              }
+            );
+
+            setUnreadCounts(
+              (currentCounts) => ({
+                ...currentCounts,
+                [selectedConversationId]: 0,
+              })
+            );
+          }
+        }
+
         setMessagesByConversation(
           (currentMessages) => ({
             ...currentMessages,
@@ -842,6 +1156,36 @@ function ChatPage() {
   }, [
     selectedConversationId,
     connectionVersion,
+  ]);
+
+  /*
+ * Subscribe to every accessible
+ * conversation for real-time
+ * message notifications.
+ */
+  useEffect(() => {
+    if (
+      !socketConnected ||
+      conversations.length === 0
+    ) {
+      return;
+    }
+
+    for (
+      const conversation of
+      conversations
+    ) {
+      socket.emit(
+        "conversation:subscribe",
+        {
+          conversationId:
+            conversation.id,
+        }
+      );
+    }
+  }, [
+    socketConnected,
+    conversations,
   ]);
 
   function selectConversation(
@@ -1171,6 +1515,70 @@ function ChatPage() {
       } others are typing...`;
   }
 
+  function getMessageReceiptText(
+    message
+  ) {
+    if (
+      message.sender.id !==
+      user.id
+    ) {
+      return "";
+    }
+
+    const states =
+      conversationStates[
+      message.conversationId
+      ] ?? {};
+
+    let deliveredCount = 0;
+    let readCount = 0;
+
+    for (
+      const state of
+      Object.values(states)
+    ) {
+      if (
+        state.userId === user.id
+      ) {
+        continue;
+      }
+
+      if (
+        state.lastDeliveredMessageId &&
+        state.lastDeliveredMessageId
+          .localeCompare(
+            message.id
+          ) >= 0
+      ) {
+        deliveredCount += 1;
+      }
+
+      if (
+        state.lastReadMessageId &&
+        state.lastReadMessageId
+          .localeCompare(
+            message.id
+          ) >= 0
+      ) {
+        readCount += 1;
+      }
+    }
+
+    if (readCount > 0) {
+      return readCount === 1
+        ? "Read"
+        : `Read by ${readCount}`;
+    }
+
+    if (deliveredCount > 0) {
+      return deliveredCount === 1
+        ? "Delivered"
+        : `Delivered to ${deliveredCount}`;
+    }
+
+    return "Sent";
+  }
+
   return (
     <main className="chat-app">
       <aside className="chat-sidebar">
@@ -1315,6 +1723,22 @@ function ChatPage() {
                         "No description"}
                     </small>
                   </span>
+
+                  {(
+                    unreadCounts[
+                    conversation.id
+                    ] ?? 0
+                  ) > 0 && (
+                      <span className="unread-badge">
+                        {unreadCounts[
+                          conversation.id
+                        ] > 99
+                          ? "99+"
+                          : unreadCounts[
+                          conversation.id
+                          ]}
+                      </span>
+                    )}
                 </button>
               )
             )}
@@ -1524,6 +1948,13 @@ function ChatPage() {
                                 message.createdAt
                               )}
                             </time>
+                            {ownMessage && (
+                              <span className="message-receipt">
+                                {getMessageReceiptText(
+                                  message
+                                )}
+                              </span>
+                            )}
                           </div>
 
                           <p>
