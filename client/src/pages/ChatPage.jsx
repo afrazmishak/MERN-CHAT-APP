@@ -563,7 +563,13 @@ function ChatPage() {
     };
   }, []);
 
+  /*
+ * Listen for typing updates.
+ */
   useEffect(() => {
+    const typingExpiryTimers =
+      typingExpiryTimersRef.current;
+
     function removeTypingUser(
       conversationId,
       userId
@@ -578,8 +584,7 @@ function ChatPage() {
           const nextUsers =
             currentUsers.filter(
               (typingUser) =>
-                typingUser.id !==
-                userId
+                typingUser.id !== userId
             );
 
           return {
@@ -608,10 +613,6 @@ function ChatPage() {
         return;
       }
 
-      /*
-       * Never show:
-       * "You are typing..."
-       */
       if (
         typingUser.id === user.id
       ) {
@@ -622,7 +623,7 @@ function ChatPage() {
         `${conversationId}:${typingUser.id}`;
 
       const existingTimer =
-        typingExpiryTimersRef.current.get(
+        typingExpiryTimers.get(
           timerKey
         );
 
@@ -631,7 +632,7 @@ function ChatPage() {
           existingTimer
         );
 
-        typingExpiryTimersRef.current.delete(
+        typingExpiryTimers.delete(
           timerKey
         );
       }
@@ -674,10 +675,6 @@ function ChatPage() {
         }
       );
 
-      /*
-       * Safety net against a stale
-       * typing indicator.
-       */
       const expiryTimer =
         setTimeout(() => {
           removeTypingUser(
@@ -685,12 +682,12 @@ function ChatPage() {
             typingUser.id
           );
 
-          typingExpiryTimersRef.current.delete(
+          typingExpiryTimers.delete(
             timerKey
           );
         }, 5000);
 
-      typingExpiryTimersRef.current.set(
+      typingExpiryTimers.set(
         timerKey,
         expiryTimer
       );
@@ -709,12 +706,12 @@ function ChatPage() {
 
       for (
         const timer of
-        typingExpiryTimersRef.current.values()
+        typingExpiryTimers.values()
       ) {
         clearTimeout(timer);
       }
 
-      typingExpiryTimersRef.current.clear();
+      typingExpiryTimers.clear();
     };
   }, [user.id]);
 
@@ -1084,7 +1081,7 @@ function ChatPage() {
       stopCurrentTyping();
     }
 
-    const now = Date.now();
+    const now = event.timeStamp;
 
     /*
      * Start immediately, then refresh
